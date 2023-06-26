@@ -1,5 +1,6 @@
 use std::str::FromStr;
 use json::JsonValue;
+use log::warn;
 use rusqlite::{Connection, params};
 
 pub fn handle_event(json: JsonValue, connection: Connection) {
@@ -68,29 +69,33 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         row.get(0)
                     }).unwrap();
                 }
-                if data_available {
-                    //TODO System Update
-                } else {
-                    let timestamp = message["timestamp"].to_string();
-                    let name = message["StarSystem"].to_string();
-                    let address = message["SystemAddress"].to_string();
-                    let population = message["Population"].to_string();
-                    let allegiance = message["SystemAllegiance"].to_string();
-                    let economy = message["SystemEconomy"].to_string();
-                    let second_economy = message["SystemSecondEconomy"].to_string();
-                    let government = message["SystemGovernment"].to_string();
-                    let security = message["SystemSecurity"].to_string();
-                    let faction = message["SystemFaction"]["Name"].to_string();
-                    //"StarPos":[-9534.00000,-905.28125,19802.03125],
-                    let mut star_pos = message["StarPos"].to_string();
-                    star_pos = star_pos.replace("[", "");
-                    star_pos = star_pos.replace("]", "");
-                    let mut string_split = star_pos.split(",");
-                    ;
-                    let x: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
-                    let y: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
-                    let z: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
+                let timestamp = message["timestamp"].to_string();
+                let name = message["StarSystem"].to_string();
+                let address = message["SystemAddress"].to_string();
+                let population = message["Population"].to_string();
+                let allegiance = message["SystemAllegiance"].to_string();
+                let economy = message["SystemEconomy"].to_string();
+                let second_economy = message["SystemSecondEconomy"].to_string();
+                let government = message["SystemGovernment"].to_string();
+                let security = message["SystemSecurity"].to_string();
+                let faction = message["SystemFaction"]["Name"].to_string();
+                //"StarPos":[-9534.00000,-905.28125,19802.03125],
+                let mut star_pos = message["StarPos"].to_string();
+                star_pos = star_pos.replace("[", "");
+                star_pos = star_pos.replace("]", "");
+                let mut string_split = star_pos.split(",");
+                ;
+                let x: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
+                let y: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
+                let z: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
 
+                if data_available {
+                    let update = "UPDATE system SET timestamp=?,population=?,allegiance=?,economy=?,second_economy=?,government=?,security=?,faction=?";
+                    let params = params![
+                        timestamp,population,allegiance,economy,second_economy,government,security,faction
+                    ];
+                    connection.execute(update, params).unwrap();
+                } else {
                     let insert = "INSERT INTO system \
                     (timestamp, name, address, population, allegiance, economy, second_economy, government, security, faction, x, y, z) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
                     let params = params![
@@ -99,44 +104,48 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     connection.execute(insert, params).unwrap();
                 }
 
-                for i in 0..message["Factions"].len() {
-                    {
-                        //Check if data already exists
-                        let sql = "SELECT EXISTS(SELECT 1 FROM system_faction where system_address = ? and name = ?)";
-                        let params = params![
+                {
+                    //Check if data already exists
+                    let sql = "SELECT EXISTS(SELECT 1 FROM system_faction where system_address = ?)";
+                    let params = params![
                             message["SystemAddress"].to_string(),
-                            message["Factions"][i]["Name"].to_string()
                         ];
-                        data_available = connection.query_row(sql, params, |row| {
-                            row.get(0)
-                        }).unwrap();
-                    }
-                    if data_available {
-                        //TODO Faction Update
-                        //TODO  faction_active_state, faction_recovering_state, conflicts
-                    } else {
-                        // "Factions":[
-                        // { "Name":"Milanov's Reavers", "FactionState":"Bust", "Government":"Anarchy", "Influence":0.010101, "Allegiance":"Independent",
-                        // "Happiness":"$Faction_HappinessBand2;", "Happiness_Localised":"Glücklich", "MyReputation":0.000000,
-                        // "RecoveringStates":[ { "State":"Terrorism", "Trend":0 } ], "ActiveStates":[ { "State":"Bust" } ] } ],
+                    data_available = connection.query_row(sql, params, |row| {
+                        row.get(0)
+                    }).unwrap();
+                }
 
-                        let timestamp = message["timestamp"].to_string();
-                        let name = message["Factions"][i]["Name"].to_string();
-                        let address = message["SystemAddress"].to_string();
-                        let faction_state = message["Factions"][i]["FactionState"].to_string();
-                        let government = message["Factions"][i]["Government"].to_string();
-                        let influence = message["Factions"][i]["Influence"].to_string();
-                        let allegiance = message["Factions"][i]["Allegiance"].to_string();
-                        let happiness = message["Factions"][i]["Happiness"].to_string();
+                if data_available {
+                    let delete = "DELETE FROM system_faction WHERE system_address = ?";
+                    let params = params![
+                                address
+                            ];
+                    connection.execute(delete, params).unwrap();
+                    //TODO  faction_active_state, faction_recovering_state, conflicts
+                }
 
-                        let insert = "INSERT INTO system_faction VALUES (?,?,?,?,?,?,?,?)";
-                        let params = params![
+                for i in 0..message["Factions"].len() {
+                    let timestamp = message["timestamp"].to_string();
+                    let name = message["Factions"][i]["Name"].to_string();
+                    let address = message["SystemAddress"].to_string();
+                    let faction_state = message["Factions"][i]["FactionState"].to_string();
+                    let government = message["Factions"][i]["Government"].to_string();
+                    let influence = message["Factions"][i]["Influence"].to_string();
+                    let allegiance = message["Factions"][i]["Allegiance"].to_string();
+                    let happiness = message["Factions"][i]["Happiness"].to_string();
+
+                    // "Factions":[
+                    // { "Name":"Milanov's Reavers", "FactionState":"Bust", "Government":"Anarchy", "Influence":0.010101, "Allegiance":"Independent",
+                    // "Happiness":"$Faction_HappinessBand2;", "Happiness_Localised":"Glücklich", "MyReputation":0.000000,
+                    // "RecoveringStates":[ { "State":"Terrorism", "Trend":0 } ], "ActiveStates":[ { "State":"Bust" } ] } ],
+
+                    let insert = "INSERT INTO system_faction VALUES (?,?,?,?,?,?,?,?)";
+                    let params = params![
                                 timestamp,name,address,faction_state,government,influence,allegiance,happiness
                             ];
-                        connection.execute(insert, params).unwrap();
+                    connection.execute(insert, params).unwrap();
 
-                        //TODO  faction_active_state, faction_recovering_state, conflicts
-                    }
+                    //TODO  faction_active_state, faction_recovering_state, conflicts
                 }
             }
         }
@@ -177,11 +186,117 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
         }
         "SAAScanComplete" => {}
         "Scan" => {
-            //TODO Differ from star and body
             //TODO Rings
             //TODO Cluster
             //TODO atmosphere_composition
             //TODO composition
+
+            let timestamp = message["timestamp"].to_string();
+            let system_name = message["StarSystem"].to_string();
+            let id = message["BodyID"].to_string();
+            let name = message["BodyName"].to_string();
+
+            let ascending_node = message["AscendingNode"].to_string();
+            let axial_tilt = message["AxialTilt"].to_string();
+            let atmosphere = message["Atmosphere"].to_string();
+            let distance_from_arrival_ls = message["DistanceFromArrivalLS"].to_string();
+            let eccentricity = message["Eccentricity"].to_string();
+            let landable = message["Landable"].to_string();
+            let mass_em = message["MassEM"].to_string();
+            let mean_anomaly = message["MeanAnomaly"].to_string();
+            let orbital_inclination = message["OrbitalInclination"].to_string();
+            let orbital_period = message["OrbitalPeriod"].to_string();
+            let periapsis = message["Periapsis"].to_string();
+            let class = message["PlanetClass"].to_string();
+            let radius = message["Radius"].to_string();
+            let rotation_period = message["RotationPeriod"].to_string();
+            let semi_major_axis = message["SemiMajorAxis"].to_string();
+            let surface_gravity = message["SurfaceGravity"].to_string();
+            let surface_pressure = message["SurfacePressure"].to_string();
+            let surface_temperature = message["SurfaceTemperature"].to_string();
+            let terraform_state = message["TerraformState"].to_string();
+            let tidal_lock = message["TidalLock"].to_string();
+            let volcanism = message["Volcanism"].to_string();
+            let discovered = message["WasDiscovered"].to_string();
+            let mapped = message["WasMapped"].to_string();
+
+            //Stars only
+            let absolute_magnitude = message["AbsoluteMagnitude"].to_string();
+            let age_my = message["Age_MY"].to_string();
+            let luminosity = message["Luminosity"].to_string();
+            let star_type = message["StarType"].to_string();
+            let stellar_mass = message["StellarMass"].to_string();
+            let subclass = message["Subclass"].to_string();
+
+            if message["StarType"].is_null() {
+                //Body
+                let sql = "INSERT OR REPLACE INTO body VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                let params = params![timestamp,system_name,id,name,ascending_node,axial_tilt,atmosphere,distance_from_arrival_ls,
+                            eccentricity,landable,mass_em,mean_anomaly,orbital_inclination,orbital_period,periapsis,class,radius
+                            ,rotation_period,semi_major_axis,surface_gravity,surface_pressure,surface_temperature,terraform_state,tidal_lock,volcanism,discovered,mapped];
+
+                connection.execute(sql, params).unwrap();
+
+                {
+                    //Body composition
+                    let delete = "DELETE FROM body_composition WHERE body_id=? and system_name=?";
+                    let params = params![
+                                    id,system_name
+                                ];
+                    connection.execute(delete, params).unwrap();
+                }
+                {
+                    //Body materials
+                    let delete = "DELETE FROM body_materials WHERE body_id=? and system_name=?";
+                    let params = params![
+                                    id,system_name
+                                ];
+                    connection.execute(delete, params).unwrap();
+                }
+                {
+                    //Body composition
+                    // "Composition":{"Ice":0,"Metal":0.327036,"Rock":0.672964},
+
+                    let mut composition_entries = message["Composition"].entries();
+                    let mut entry_option = composition_entries.next();
+                    while !entry_option.is_none() {
+                        let composition = entry_option.unwrap();
+                        let name = composition.0;
+                        let percentage = composition.1.to_string();
+
+                        let sql = "INSERT INTO body_composition VALUES (?,?,?,?,?)";
+                        let params = params![timestamp,id,system_name,name,percentage];
+
+                        connection.execute(sql, params).unwrap();
+
+                        entry_option = composition_entries.next();
+                    }
+                }
+
+                {
+                    //Body materials
+                    // "Materials":[{"Name":"iron","Percent":21.13699},{"Name":"nickel","Percent":15.987134},{"Name":"sulphur","Percent":15.03525},{"Name":"carbon","Percent":12.643088},{"Name":"chromium","Percent":9.506006},{"Name":"manganese","Percent":8.729361},{"Name":"phosphorus","Percent":8.094321},
+                    for i in 0..message["Materials"].len() {
+                        let name = message["Materials"][i]["Name"].to_string();
+                        let percentage = message["Materials"][i]["Percent"].to_string();
+
+                        let sql = "INSERT INTO body_materials VALUES (?,?,?,?,?)";
+                        let params = params![timestamp,id,system_name,name,percentage];
+
+                        connection.execute(sql, params).unwrap();
+                    }
+                }
+            } else {
+                //Star
+                let sql = "INSERT OR REPLACE INTO star VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                let params = params![
+                                timestamp,system_name,name,id,absolute_magnitude,age_my,ascending_node,axial_tilt,distance_from_arrival_ls,eccentricity,
+                                luminosity,mean_anomaly,orbital_inclination,orbital_period,periapsis,radius,rotation_period,semi_major_axis,star_type,stellar_mass,subclass,
+                                surface_temperature,discovered,mapped
+                            ];
+
+                connection.execute(sql, params).unwrap();
+            }
 
             match message["ScanType"].as_str().unwrap() {
                 "Detailed" => {
@@ -232,8 +347,6 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     // "Periapsis":276.930693,"Radius":148871968.0,"RotationPeriod":76033.675205,"ScanType":"AutoScan","SemiMajorAxis":63628426194.19098,"StarPos":[95.5625,-19.78125,-54.59375],
                     // "StarSystem":"Orom","StarType":"T","StellarMass":0.074219,"Subclass":2,"SurfaceTemperature":1160.0,"SystemAddress":672296609169,"WasDiscovered":true,"WasMapped":false,
                     // "event":"Scan","horizons":true,"odyssey":true,"timestamp":"2023-06-15T09:29:26Z"}}
-                    //TODO Detailed scan
-                    //TODO Stars
                 }
                 "AutoScan" => {
                     //atmosphere_composition
@@ -265,93 +378,16 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     // "AutoScan","SemiMajorAxis":10693013072013.855,"StarPos":[4771.21875,66.09375,-5538.71875],"StarSystem":"Hypiae Aip NK-W b29-7","StarType":"L",
                     // "StellarMass":0.117188,"Subclass":8,"SurfaceTemperature":1407.0,"SystemAddress":16128005119233,"WasDiscovered":false,"WasMapped":false,
                     // "event":"Scan","horizons":true,"odyssey":true,"timestamp":"2023-06-15T13:13:27Z"}
-                    //TODO Stars
-                    let mut data_available: bool = true;
-                    {
-                        //Check if data already exists
-                        let sql = "SELECT EXISTS(SELECT 1 FROM body where system_name = ? and id = ?)";
-                        data_available = connection.query_row(sql, params![message["StarSystem"].as_str().unwrap(),message["BodyID"].to_string()], |row| {
-                            row.get(0)
-                        }).unwrap();
-                    }
-                    if !data_available {
-                        let timestamp = message["timestamp"].to_string();
-                        let system_name = message["StarSystem"].to_string();
-                        let id = message["BodyID"].to_string();
-                        let name = message["BodyName"].to_string();
 
-                        let ascending_node = message["AscendingNode"].to_string();
-                        let axial_tilt = message["AxialTilt"].to_string();
-                        let atmosphere = message["Atmosphere"].to_string();
-                        let distance_from_arrival_ls = message["DistanceFromArrivalLS"].to_string();
-                        let eccentricity = message["Eccentricity"].to_string();
-                        let landable = message["Landable"].to_string();
-                        let mass_em = message["MassEM"].to_string();
-                        let mean_anomaly = message["MeanAnomaly"].to_string();
-                        let orbital_inclination = message["OrbitalInclination"].to_string();
-                        let orbital_period = message["OrbitalPeriod"].to_string();
-                        let periapsis = message["Periapsis"].to_string();
-                        let class = message["PlanetClass"].to_string();
-                        let radius = message["Radius"].to_string();
-                        let rotation_period = message["RotationPeriod"].to_string();
-                        let semi_major_axis = message["SemiMajorAxis"].to_string();
-                        let surface_gravity = message["SurfaceGravity"].to_string();
-                        let surface_pressure = message["SurfacePressure"].to_string();
-                        let surface_temperature = message["SurfaceTemperature"].to_string();
-                        let terraform_state = message["TerraformState"].to_string();
-                        let tidal_lock = message["TidalLock"].to_string();
-                        let volcanism = message["Volcanism"].to_string();
-                        let discovered = message["WasDiscovered"].to_string();
-                        let mapped = message["WasMapped"].to_string();
-
-
-                        let sql = "INSERT INTO body VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-                        let params = params![timestamp,system_name,id,name,ascending_node,axial_tilt,atmosphere,distance_from_arrival_ls,
-                            eccentricity,landable,mass_em,mean_anomaly,orbital_inclination,orbital_period,periapsis,class,radius
-                            ,rotation_period,semi_major_axis,surface_gravity,surface_pressure,surface_temperature,terraform_state,tidal_lock,volcanism,discovered,mapped];
-
-                        connection.execute(sql, params).unwrap();
-
-                        {
-                            //Body composition
-                            // "Composition":{"Ice":0,"Metal":0.327036,"Rock":0.672964},
-
-                            let mut composition_entries = message["Composition"].entries();
-                            let mut entry_option = composition_entries.next();
-                            while !entry_option.is_none() {
-                                let composition = entry_option.unwrap();
-                                let name = composition.0;
-                                let percentage = composition.1.to_string();
-
-                                let sql = "INSERT INTO body_composition VALUES (?,?,?,?,?)";
-                                let params = params![timestamp,id,system_name,name,percentage];
-
-                                connection.execute(sql, params).unwrap();
-
-                                entry_option = composition_entries.next();
-                            }
-                        }
-
-                        {
-                            //Body materials
-                            // "Materials":[{"Name":"iron","Percent":21.13699},{"Name":"nickel","Percent":15.987134},{"Name":"sulphur","Percent":15.03525},{"Name":"carbon","Percent":12.643088},{"Name":"chromium","Percent":9.506006},{"Name":"manganese","Percent":8.729361},{"Name":"phosphorus","Percent":8.094321},
-                            for i in 0..message["Materials"].len(){
-                                let name = message["Materials"][i]["Name"].to_string();
-                                let percentage = message["Materials"][i]["Percent"].to_string();
-
-                                let sql = "INSERT INTO body_materials VALUES (?,?,?,?,?)";
-                                let params = params![timestamp,id,system_name,name,percentage];
-
-                                connection.execute(sql, params).unwrap();
-                            }
-                        }
-
-                    } else {
-                        //TODO Update
-                    }
+                }
+                "NavBeaconDetail" => {
+                    //{"AscendingNode":59.981854,"Atmosphere":"thin carbon dioxide atmosphere","AtmosphereComposition":[{"Name":"CarbonDioxide","Percent":99.009911},{"Name":"SulphurDioxide","Percent":0.990099}],"AtmosphereType":"CarbonDioxide","AxialTilt":-0.46992,"BodyID":43,"BodyName":"Iota Horologii A 7 d","Composition":{"Ice":0,"Metal":0.089416,"Rock":0.910584},"DistanceFromArrivalLS":2189.493581,"Eccentricity":0.00291,"Landable":true,"MassEM":0.000919,"Materials":[{"Name":"iron","Percent":18.952173},{"Name":"sulphur","Percent":18.461615},{"Name":"carbon","Percent":15.524308},{"Name":"nickel","Percent":14.334629},{"Name":"phosphorus","Percent":9.938927},{"Name":"chromium","Percent":8.523421},{"Name":"germanium","Percent":5.470057},{"Name":"zinc","Percent":5.150491},{"Name":"cadmium","Percent":1.471722},{"Name":"yttrium","Percent":1.131991},{"Name":"tungsten","Percent":1.040665}],"MeanAnomaly":140.729594,"OrbitalInclination":-0.13871,"OrbitalPeriod":428179.824352,"Parents":[{"Planet":37},{"Null":28},{"Star":1},{"Null":0}],"Periapsis":77.930051,"PlanetClass":"Rocky body","Radius":684243.125,"RotationPeriod":428190.902071,"ScanType":"NavBeaconDetail","SemiMajorAxis":444461178.779602,"StarPos":[29.4375,-47.625,-0.9375],"StarSystem":"Iota Horologii","SurfaceGravity":0.782219,"SurfacePressure":1201.276978,"SurfaceTemperature":162.988632,"SystemAddress":422810995051,"TerraformState":"","TidalLock":true,"Volcanism":"","WasDiscovered":true,"WasMapped":true,"event":"Scan","horizons":true,"odyssey":true,"timestamp":"2023-06-26T16:02:15Z"}
                 }
                 _ => {
+                    warn!("Unknown scan type : {}", message["ScanType"].as_str().unwrap());
+                    warn!("{message}");
                     println!("Unknown scan type : {}", message["ScanType"].as_str().unwrap());
+                    println!("{message}");
                 }
             }
         }
@@ -555,8 +591,109 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
 
         "Fileheader" => {}
         "Shutdown" => {}
-        "None" => {}
-        "" => {}
-        _ => {}
+        "None" | "" | _ => {
+            let timestamp = message["timestamp"].to_string();
+            let market_id = message["marketId"].to_string();
+            let station_name = message["stationName"].to_string();
+            let system_name = message["systemName"].to_string();
+            if !message["ships"].is_null(){
+                //ships
+                {
+                    let sql = "INSERT OR REPLACE INTO station VALUES (?,?,?,?)";
+                    let params = params![
+                        timestamp,
+                        station_name,
+                        market_id,
+                        system_name
+                    ];
+                    connection.execute(sql,params).unwrap();
+                }
+                {
+                    let delete = "DELETE FROM ship WHERE market_id=?";
+                    let params = params![
+                        market_id
+                    ];
+                    connection.execute(delete, params).unwrap();
+                }
+                for i in 0..message["ships"].len() {
+                    let insert = "INSERT INTO ship VALUES (?,?,?)";
+                    let params = params![
+                        timestamp,
+                        market_id,
+                        message["ships"][i].to_string()
+                    ];
+
+                    connection.execute(insert, params).unwrap();
+                }
+            }else{
+            if !message["modules"].is_null(){
+                //modules
+                {
+                    let sql = "INSERT OR REPLACE INTO station VALUES (?,?,?,?)";
+                    let params = params![
+                        timestamp,
+                        station_name,
+                        market_id,
+                        system_name
+                    ];
+                    connection.execute(sql,params).unwrap();
+                }
+                {
+                    let delete = "DELETE FROM module WHERE market_id=?";
+                    let params = params![
+                        market_id
+                    ];
+                    connection.execute(delete, params).unwrap();
+                }
+                for i in 0..message["modules"].len() {
+                    let insert = "INSERT INTO module VALUES (?,?,?)";
+                    let params = params![
+                        timestamp,
+                        market_id,
+                        message["modules"][i].to_string()
+                    ];
+
+                    connection.execute(insert, params).unwrap();
+                }
+            }else{
+            if !message["commodities"].is_null(){
+                //commodities
+                {
+                    let sql = "INSERT OR REPLACE INTO station VALUES (?,?,?,?)";
+                    let params = params![
+                        timestamp,
+                        station_name,
+                        market_id,
+                        system_name
+                    ];
+                    connection.execute(sql,params).unwrap();
+                }
+                {
+                    let delete = "DELETE FROM commodity WHERE market_id=?";
+                    let params = params![
+                        market_id
+                    ];
+                    connection.execute(delete, params).unwrap();
+                }
+                for i in 0..message["commodities"].len() {
+                    let insert = "INSERT INTO commodity VALUES (?,?,?,?,?,?,?,?,?)";
+                    let params = params![
+                        timestamp,
+                        market_id,
+                        message["commodities"][i]["name"].to_string(),
+                        message["commodities"][i]["buyPrice"].to_string(),
+                        message["commodities"][i]["sellPrice"].to_string(),
+                        message["commodities"][i]["meanPrice"].to_string(),
+                        message["commodities"][i]["demandBracket"].to_string(),
+                        message["commodities"][i]["stock"].to_string(),
+                        message["commodities"][i]["stockBracket"].to_string()
+                    ];
+
+                    connection.execute(insert, params).unwrap();
+                }
+            }else {
+                warn!("Unknown message: {json}");
+            }}}
+        }
     }
 }

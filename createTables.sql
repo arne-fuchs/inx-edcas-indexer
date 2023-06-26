@@ -69,10 +69,10 @@ create table if not exists atmosphere_composition (
 
 create table if not exists star (
     timestamp text,
-    system_address text,
+    system_name text,
     name text,
     id integer,
-    absolute_magnitued real,
+    absolute_magnitude real,
     age_my integer,
     ascending_node real,
     axial_tilt real,
@@ -93,8 +93,8 @@ create table if not exists star (
     discovered integer,
     mapped integer,
 
-    primary key (system_address,id),
-    foreign key (system_address) references system(address)
+    primary key (system_name,id),
+    foreign key (system_name) references system(name)
 );
 
 create table if not exists ring (
@@ -191,16 +191,33 @@ create table if not exists conflicts (
 create table if not exists station (
     timestamp text,
     station_name text,
-    market_id text,
+    market_id integer,
     system_name text,
 
     primary key (market_id),
     foreign key (system_name) references system(name)
 );
 
+create table if not exists ship (
+  timestamp text,
+  market_id integer,
+  ship text,
+  primary key (market_id,ship),
+  foreign key (market_id) references station(market_id)
+);
+
+create table if not exists module (
+    timestamp text,
+    market_id integer,
+    name text,
+
+    primary key (market_id,name),
+    foreign key (market_id) references station(market_id)
+);
+
 create table if not exists commodity (
   timestamp text,
-  market_id text,
+  market_id integer,
   name text,
   buy_price integer,
   sell_price integer,

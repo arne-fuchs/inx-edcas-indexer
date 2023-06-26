@@ -13,11 +13,22 @@ use async_std::task;
 use flate2::read::ZlibDecoder;
 use iota_client::block::Block;
 use iota_client::block::payload::Payload;
+use log::LevelFilter::Debug;
 use rusqlite::Connection;
 
 #[tokio::main]
 async fn main() {
     dotenv().expect(".env file not found");
+
+    let logger_output_config = fern_logger::LoggerOutputConfigBuilder::new()
+        .name("indexer.log")
+        .target_exclusions(&["h2", "hyper", "rustls","iota_wallet","iota_client","reqwest","tungstenite","rumqttc"])
+        .level_filter(Debug);
+
+    let config = fern_logger::LoggerConfig::build()
+        .with_output(logger_output_config)
+        .finish();
+    fern_logger::logger_init(config).unwrap();
 
     let connection = Connection::open("database.db").unwrap();
     let script = std::fs::read_to_string("createTables.sql").unwrap();
@@ -87,8 +98,8 @@ fn handle_block(block: Block) {
                     let result = json::parse(message.as_str());
                     match result {
                         Ok(json) => {
-                            let message = json["message"].clone();
-                            println!("{message}");
+                            //let message = json["message"].clone();
+                            //println!("{message}");
                             event_handler::handle_event(json,Connection::open("database.db").unwrap());
                         }
                         Err(_) => {}
