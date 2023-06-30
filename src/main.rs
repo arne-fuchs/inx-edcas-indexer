@@ -9,6 +9,7 @@ use iota_client::{Client, MqttEvent, MqttPayload, Result, Topic};
 use std::sync::{mpsc::channel, Arc, Mutex};
 use std::{io, thread};
 use std::io::Read;
+use std::time::Duration;
 use async_std::task;
 use flate2::read::ZlibDecoder;
 use iota_client::block::Block;
@@ -30,7 +31,8 @@ async fn main() {
         .finish();
     fern_logger::logger_init(config).unwrap();
 
-    let connection = Connection::open("database.db").unwrap();
+    let connection = Connection::open(std::env::var("DATABASE_PATH").unwrap()).unwrap();
+    connection.busy_timeout(Duration::from_secs(5)).unwrap();
     let script = std::fs::read_to_string("createTables.sql").unwrap();
     connection.execute_batch(&script).unwrap();
 
