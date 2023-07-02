@@ -104,7 +104,7 @@ fn handle_block(block: Block) {
                             //println!("{message}");
                             //TODO Move the database path to global variable
                             let connection = Connection::open(std::env::var("DATABASE_PATH").unwrap()).unwrap();
-                            connection.busy_timeout(Duration::from_secs(5)).unwrap();
+                            connection.busy_timeout(Duration::from_secs(10)).unwrap();
                             event_handler::handle_event(json,connection);
                         }
                         Err(_) => {}
