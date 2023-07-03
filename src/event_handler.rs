@@ -59,7 +59,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
 
             //{"Body":"BD+15 1957","BodyID":1,"BodyType":"Star","Multicrew":false,"Population":0,"StarPos":[23.28125,30.65625,-35.09375],"StarSystem":"BD+15 1957","SystemAddress":5031721997002,"SystemAllegiance":"","SystemEconomy":"$economy_None;","SystemGovernment":"$government_None;","SystemSecondEconomy":"$economy_None;","SystemSecurity":"$GAlAXY_MAP_INFO_state_anarchy;","Taxi":false,"event":"FSDJump","horizons":true,"odyssey":true,"timestamp":"2023-06-25T21:08:01Z"}
             {
-                let mut data_available: bool = true;
+                let mut data_available: bool = false;
                 {
                     //Check if data already exists
                     let sql = "SELECT EXISTS(SELECT 1 FROM system where address = ?)";
