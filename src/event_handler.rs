@@ -1,8 +1,9 @@
 use std::str::FromStr;
+use std::thread::sleep;
 use std::time::Duration;
 use json::JsonValue;
 use log::warn;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Error, params, ToSql};
 
 pub fn handle_event(json: JsonValue, connection: Connection) {
     let message = json["message"].clone();
@@ -85,7 +86,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                 star_pos = star_pos.replace("[", "");
                 star_pos = star_pos.replace("]", "");
                 let mut string_split = star_pos.split(",");
-                ;
+
                 let x: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
                 let y: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
                 let z: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
@@ -95,14 +96,14 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     let params = params![
                         timestamp,population,allegiance,economy,second_economy,government,security,faction
                     ];
-                    connection.execute(update, params).unwrap();
+                    execute(&connection,update,params);
                 } else {
                     let insert = "INSERT INTO system \
                     (timestamp, name, address, population, allegiance, economy, second_economy, government, security, faction, x, y, z) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
                     let params = params![
                         timestamp,name,address,population,allegiance,economy,second_economy,government,security,faction,x,y,z
                     ];
-                    connection.execute(insert, params).unwrap();
+                     execute(&connection,insert,params);
                 }
 
                 {
@@ -121,7 +122,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     let params = params![
                                 address
                             ];
-                    connection.execute(delete, params).unwrap();
+                    execute(&connection,delete,params);
                     //TODO  faction_active_state, faction_recovering_state, conflicts
                 }
 
@@ -144,7 +145,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     let params = params![
                                 timestamp,name,address,faction_state,government,influence,allegiance,happiness
                             ];
-                    connection.execute(insert, params).unwrap();
+                     execute(&connection,insert,params);
 
                     //TODO  faction_active_state, faction_recovering_state, conflicts
                 }
@@ -236,7 +237,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                             eccentricity,landable,mass_em,mean_anomaly,orbital_inclination,orbital_period,periapsis,class,radius
                             ,rotation_period,semi_major_axis,surface_gravity,surface_pressure,surface_temperature,terraform_state,tidal_lock,volcanism,discovered,mapped];
 
-                connection.execute(sql, params).unwrap();
+                 execute(&connection,sql,params);
 
                 {
                     //Body composition
@@ -244,7 +245,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     let params = params![
                                     id,system_name
                                 ];
-                    connection.execute(delete, params).unwrap();
+                    execute(&connection,delete,params);
                 }
                 {
                     //Body materials
@@ -252,7 +253,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     let params = params![
                                     id,system_name
                                 ];
-                    connection.execute(delete, params).unwrap();
+                    execute(&connection,delete,params);
                 }
                 {
                     //Body composition
@@ -268,7 +269,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         let sql = "INSERT INTO body_composition VALUES (?,?,?,?,?)";
                         let params = params![timestamp,id,system_name,name,percentage];
 
-                        connection.execute(sql, params).unwrap();
+                         execute(&connection,sql,params);
 
                         entry_option = composition_entries.next();
                     }
@@ -284,7 +285,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         let sql = "INSERT INTO body_materials VALUES (?,?,?,?,?)";
                         let params = params![timestamp,id,system_name,name,percentage];
 
-                        connection.execute(sql, params).unwrap();
+                         execute(&connection,sql,params);
                     }
                 }
             } else {
@@ -296,7 +297,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                                 surface_temperature,discovered,mapped
                             ];
 
-                connection.execute(sql, params).unwrap();
+                 execute(&connection,sql,params);
             }
 
             match message["ScanType"].as_str().unwrap() {
@@ -611,14 +612,14 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         market_id,
                         system_name
                     ];
-                    connection.execute(sql,params).unwrap();
+                     execute(&connection,sql,params);
                 }
                 {
                     let delete = "DELETE FROM ship WHERE market_id=?";
                     let params = params![
                         market_id
                     ];
-                    connection.execute(delete, params).unwrap();
+                    execute(&connection,delete,params);
                 }
                 for i in 0..message["ships"].len() {
                     let insert = "INSERT INTO ship VALUES (?,?,?)";
@@ -628,7 +629,7 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         message["ships"][i].to_string()
                     ];
 
-                    connection.execute(insert, params).unwrap();
+                     execute(&connection,insert,params);
                 }
             }else{
             if !message["modules"].is_null(){
@@ -641,14 +642,14 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         market_id,
                         system_name
                     ];
-                    connection.execute(sql,params).unwrap();
+                     execute(&connection,sql,params);
                 }
                 {
                     let delete = "DELETE FROM module WHERE market_id=?";
                     let params = params![
                         market_id
                     ];
-                    connection.execute(delete, params).unwrap();
+                    execute(&connection,delete,params);
                 }
                 for i in 0..message["modules"].len() {
                     let insert = "INSERT INTO module VALUES (?,?,?)";
@@ -657,8 +658,8 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         market_id,
                         message["modules"][i].to_string()
                     ];
+                    execute(&connection,insert,params);
 
-                    connection.execute(insert, params).unwrap();
                 }
             }else{
             if !message["commodities"].is_null(){
@@ -671,14 +672,14 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         market_id,
                         system_name
                     ];
-                    connection.execute(sql,params).unwrap();
+                    execute(&connection,sql,params);
                 }
                 {
                     let delete = "DELETE FROM commodity WHERE market_id=?";
                     let params = params![
                         market_id
                     ];
-                    connection.execute(delete, params).unwrap();
+                    execute(&connection,delete,params);
                 }
                 for i in 0..message["commodities"].len() {
                     let insert = "INSERT INTO commodity VALUES (?,?,?,?,?,?,?,?,?)";
@@ -694,11 +695,37 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                         message["commodities"][i]["stockBracket"].to_string()
                     ];
 
-                    connection.execute(insert, params).unwrap();
+                     execute(&connection,insert,params);
                 }
             }else {
                 warn!("Unknown message: {json}");
             }}}
+        }
+    }
+}
+
+fn execute(connection: &Connection,sql: &str, params: &[&dyn ToSql]){
+    match connection.execute(sql, params) {
+        Ok(_) => {}
+        Err(err) => {
+            match err {
+                Error::SqliteFailure(err, string) => {
+                    match string {
+                        None => {
+                            panic!("{}", err);
+                        }
+                        Some(string) => {
+                            if string.contains("database is locked") {
+                                sleep(Duration::from_secs(1));
+                                execute(connection,sql,params);
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    panic!("{}", err);
+                }
+            }
         }
     }
 }
