@@ -56,7 +56,7 @@ async fn main() {
         }
     });
 
-    let tag = hex::encode("EDCAS");
+    let tag = hex::encode("EDDN");
 
     let topic = format!("blocks/tagged-data/0x{tag}");
     println!("Listening topic: {topic}");
