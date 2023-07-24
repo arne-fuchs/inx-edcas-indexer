@@ -56,15 +56,12 @@ async fn main() {
         }
     });
 
-    let tag = hex::encode("EDDN");
-
-    let topic = format!("blocks/tagged-data/0x{tag}");
-    println!("Listening topic: {topic}");
+    let tags = vec![hex::encode("EDDN"),hex::encode("SCAN"),hex::encode("FSDJUMP"),hex::encode("LOCATION"),hex::encode("CARRIERJUMP")];
+    let topics = tags.iter().map(|tag| Topic::try_from(format!("blocks/tagged-data/0x{tag}")).unwrap()).collect();
+    println!("Listening topics: {:?}",topics);
     client
         .subscribe(
-            vec![
-                Topic::try_from(topic).unwrap()
-            ],
+            topics,
             move |event| {
                 match &event.payload {
                     MqttPayload::Json(val) => println!("{}", serde_json::to_string(&val).unwrap()),
@@ -95,6 +92,11 @@ fn handle_block(block: Block) {
                 Payload::Milestone(_) => {}
                 Payload::TreasuryTransaction(_) => {}
                 Payload::TaggedData(tagged_data) => {
+                    let tag = String::from_utf8(tagged_data.tag().to_vec()).unwrap();
+                    if tag != "EDDN".to_string() {
+                        println!("{}",tag);
+                    }
+
                     let data = tagged_data.data().to_vec();
                     let mut message = decode_reader(data).unwrap();
                     let result = json::parse(message.as_str());
