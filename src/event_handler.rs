@@ -1,15 +1,17 @@
 use std::str::FromStr;
-use std::thread::sleep;
-use std::time::Duration;
+use std::sync::Arc;
+use chrono::Utc;
 use json::JsonValue;
 use log::warn;
-use rusqlite::{Connection, Error, params, ToSql};
+use tokio::sync::Mutex;
 
-pub fn handle_event(json: JsonValue, connection: Connection) {
+pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Client>>) {
+    let timestamp = Utc::now().timestamp();
     let mut message = json.clone();
-    if !json["message"].is_null(){
+    if !json["message"].is_null() {
         message = json["message"].clone();
     }
+
     let event_result = message["event"].as_str();
     let mut event = "None";
     match event_result {
@@ -62,22 +64,11 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
 
 
             //{"Body":"BD+15 1957","BodyID":1,"BodyType":"Star","Multicrew":false,"Population":0,"StarPos":[23.28125,30.65625,-35.09375],"StarSystem":"BD+15 1957","SystemAddress":5031721997002,"SystemAllegiance":"","SystemEconomy":"$economy_None;","SystemGovernment":"$government_None;","SystemSecondEconomy":"$economy_None;","SystemSecurity":"$GAlAXY_MAP_INFO_state_anarchy;","Taxi":false,"event":"FSDJump","horizons":true,"odyssey":true,"timestamp":"2023-06-25T21:08:01Z"}
+
             {
-                let mut data_available: bool = false;
-                {
-                    //Check if data already exists
-                    let sql = "SELECT EXISTS(SELECT 1 FROM system where address = ?)";
-                    let params = params![
-                        message["SystemAddress"].to_string()
-                    ];
-                    data_available = connection.query_row(sql, params, |row| {
-                        row.get(0)
-                    }).unwrap();
-                }
-                let timestamp = message["timestamp"].to_string();
                 let name = message["StarSystem"].to_string();
-                let address = message["SystemAddress"].to_string();
-                let population = message["Population"].to_string();
+                let address = message["SystemAddress"].as_i64().unwrap();
+                let population = message["Population"].as_i32();
                 let allegiance = message["SystemAllegiance"].to_string();
                 let economy = message["SystemEconomy"].to_string();
                 let second_economy = message["SystemSecondEconomy"].to_string();
@@ -90,52 +81,48 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                 star_pos = star_pos.replace("]", "");
                 let mut string_split = star_pos.split(",");
 
-                let x: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
-                let y: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
-                let z: f64 = f64::from_str(string_split.next().unwrap()).unwrap();
+                let x: f32 = f32::from_str(string_split.next().unwrap()).unwrap();
+                let y: f32 = f32::from_str(string_split.next().unwrap()).unwrap();
+                let z: f32 = f32::from_str(string_split.next().unwrap()).unwrap();
 
-                if data_available {
-                    let update = "UPDATE system SET timestamp=?,population=?,allegiance=?,economy=?,second_economy=?,government=?,security=?,faction=?";
-                    let params = params![
-                        timestamp,population,allegiance,economy,second_economy,government,security,faction
-                    ];
-                    execute(&connection,update,params);
-                } else {
-                    let insert = "INSERT INTO system \
-                    (timestamp, name, address, population, allegiance, economy, second_economy, government, security, faction, x, y, z) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
-                    let params = params![
-                        timestamp,name,address,population,allegiance,economy,second_economy,government,security,faction,x,y,z
-                    ];
-                     execute(&connection,insert,params);
-                }
+                let odyssey = message["odyssey"].as_bool().unwrap_or(true);
 
-                {
-                    //Check if data already exists
-                    let sql = "SELECT EXISTS(SELECT 1 FROM system_faction where system_address = ?)";
-                    let params = params![
-                            message["SystemAddress"].to_string(),
-                        ];
-                    data_available = connection.query_row(sql, params, |row| {
-                        row.get(0)
-                    }).unwrap();
-                }
+                //language=postgresql
+                let insert = "
+                    INSERT INTO system
+                        (timestamp, name, address, population, allegiance, economy, second_economy, government, security, faction, x, y, z, odyssey)
+                    VALUES
+                        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    ON CONFLICT (address,odyssey) DO UPDATE SET
+                        timestamp = excluded.timestamp,
+                        name = excluded.name,
+                        address = excluded.address,
+                        population = excluded.population,
+                        allegiance = excluded.allegiance,
+                        economy = excluded.economy,
+                        second_economy = excluded.second_economy,
+                        government = excluded.government,
+                        security = excluded.security,
+                        faction = excluded.faction,
+                        x = excluded.x,
+                        y = excluded.y,
+                        z = excluded.z,
+                        odyssey = excluded.odyssey;";
+                client.lock().await.execute(insert,
+                                            &[&timestamp, &name, &address, &population, &allegiance, &economy, &second_economy, &government, &security, &faction, &x, &y, &z, &odyssey],
+                ).await.unwrap();
 
-                if data_available {
-                    let delete = "DELETE FROM system_faction WHERE system_address = ?";
-                    let params = params![
-                                address
-                            ];
-                    execute(&connection,delete,params);
-                    //TODO  faction_active_state, faction_recovering_state, conflicts
-                }
+                //language=postgresql
+                let delete = "DELETE FROM system_faction WHERE system_address = $1 and odyssey = $2;";
+                client.lock().await.execute(delete, &[&address, &odyssey]).await.unwrap();
+                //TODO  faction_active_state, faction_recovering_state, conflicts
 
                 for i in 0..message["Factions"].len() {
-                    let timestamp = message["timestamp"].to_string();
                     let name = message["Factions"][i]["Name"].to_string();
-                    let address = message["SystemAddress"].to_string();
+                    let address = message["SystemAddress"].as_i64().unwrap();
                     let faction_state = message["Factions"][i]["FactionState"].to_string();
                     let government = message["Factions"][i]["Government"].to_string();
-                    let influence = message["Factions"][i]["Influence"].to_string();
+                    let influence = message["Factions"][i]["Influence"].as_f32().unwrap();
                     let allegiance = message["Factions"][i]["Allegiance"].to_string();
                     let happiness = message["Factions"][i]["Happiness"].to_string();
 
@@ -144,11 +131,27 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     // "Happiness":"$Faction_HappinessBand2;", "Happiness_Localised":"Glücklich", "MyReputation":0.000000,
                     // "RecoveringStates":[ { "State":"Terrorism", "Trend":0 } ], "ActiveStates":[ { "State":"Bust" } ] } ],
 
-                    let insert = "INSERT INTO system_faction VALUES (?,?,?,?,?,?,?,?)";
-                    let params = params![
-                                timestamp,name,address,faction_state,government,influence,allegiance,happiness
-                            ];
-                     execute(&connection,insert,params);
+                    //language=postgresql
+                    let insert = "INSERT INTO system_faction (timestamp, name, system_address, faction_state, government, influence, allegiance, happiness, odyssey) VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9) ON CONFLICT (system_address,name,odyssey) DO UPDATE SET
+                                                                                                                                                                                                                                timestamp = excluded.timestamp,
+                                                                                                                                                                                                                                name = excluded.name,
+                                                                                                                                                                                                                                system_address = excluded.system_address,
+                                                                                                                                                                                                                                faction_state = excluded.faction_state,
+                                                                                                                                                                                                                                government = excluded.government,
+                                                                                                                                                                                                                                influence = excluded.influence,
+                                                                                                                                                                                                                                allegiance = excluded.allegiance,
+                                                                                                                                                                                                                                happiness = excluded.happiness,
+                                                                                                                                                                                                                                odyssey = excluded.odyssey;";
+                    match client.lock().await.execute(insert,
+                                                      &[&timestamp, &name, &address, &faction_state, &government, &influence, &allegiance, &happiness, &odyssey],
+                    ).await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            if !err.to_string().contains("violates foreign key constraint") {
+                                panic!("{}", err);
+                            }
+                        }
+                    }
 
                     //TODO  faction_active_state, faction_recovering_state, conflicts
                 }
@@ -192,67 +195,99 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
             //TODO atmosphere_composition
             //TODO composition
 
-            let timestamp = message["timestamp"].to_string();
-            let system_name = message["StarSystem"].to_string();
-            let id = message["BodyID"].to_string();
+            let system_address = message["SystemAddress"].as_i64().unwrap();
+            let id = message["BodyID"].as_i32().unwrap();
             let name = message["BodyName"].to_string();
 
-            let ascending_node = message["AscendingNode"].to_string();
-            let axial_tilt = message["AxialTilt"].to_string();
+            let ascending_node = message["AscendingNode"].as_f32();
+            let axial_tilt = message["AxialTilt"].as_f32();
             let atmosphere = message["Atmosphere"].to_string();
-            let distance_from_arrival_ls = message["DistanceFromArrivalLS"].to_string();
-            let eccentricity = message["Eccentricity"].to_string();
-            let landable = message["Landable"].to_string();
-            let mass_em = message["MassEM"].to_string();
-            let mean_anomaly = message["MeanAnomaly"].to_string();
-            let orbital_inclination = message["OrbitalInclination"].to_string();
-            let orbital_period = message["OrbitalPeriod"].to_string();
-            let periapsis = message["Periapsis"].to_string();
+            let distance_from_arrival_ls = message["DistanceFromArrivalLS"].as_f32().unwrap();
+            let eccentricity = message["Eccentricity"].as_f32();
+            let landable = message["Landable"].as_bool().unwrap_or(false);
+            let mass_em = message["MassEM"].as_f32();
+            let mean_anomaly = message["MeanAnomaly"].as_f32();
+            let orbital_inclination = message["OrbitalInclination"].as_f32();
+            let orbital_period = message["OrbitalPeriod"].as_f32();
+            let periapsis = message["Periapsis"].as_f32();
             let class = message["PlanetClass"].to_string();
-            let radius = message["Radius"].to_string();
-            let rotation_period = message["RotationPeriod"].to_string();
-            let semi_major_axis = message["SemiMajorAxis"].to_string();
-            let surface_gravity = message["SurfaceGravity"].to_string();
-            let surface_pressure = message["SurfacePressure"].to_string();
-            let surface_temperature = message["SurfaceTemperature"].to_string();
+            let radius = message["Radius"].as_f32();
+            let rotation_period = message["RotationPeriod"].as_f32();
+            let semi_major_axis = message["SemiMajorAxis"].as_f32();
+            let surface_gravity = message["SurfaceGravity"].as_f32();
+            let surface_pressure = message["SurfacePressure"].as_f32();
+            let surface_temperature = message["SurfaceTemperature"].as_f32();
             let terraform_state = message["TerraformState"].to_string();
-            let tidal_lock = message["TidalLock"].to_string();
+            let tidal_lock = message["TidalLock"].as_bool();
             let volcanism = message["Volcanism"].to_string();
-            let discovered = message["WasDiscovered"].to_string();
-            let mapped = message["WasMapped"].to_string();
+            let discovered = message["WasDiscovered"].as_bool().unwrap();
+            let mapped = message["WasMapped"].as_bool().unwrap();
 
-            //Stars only
-            let absolute_magnitude = message["AbsoluteMagnitude"].to_string();
-            let age_my = message["Age_MY"].to_string();
-            let luminosity = message["Luminosity"].to_string();
-            let star_type = message["StarType"].to_string();
-            let stellar_mass = message["StellarMass"].to_string();
-            let subclass = message["Subclass"].to_string();
+            let odyssey = message["odyssey"].as_bool().unwrap_or(true);
+
 
             if message["StarType"].is_null() {
                 //Body
-                let sql = "INSERT OR REPLACE INTO body VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-                let params = params![timestamp,system_name,id,name,ascending_node,axial_tilt,atmosphere,distance_from_arrival_ls,
-                            eccentricity,landable,mass_em,mean_anomaly,orbital_inclination,orbital_period,periapsis,class,radius
-                            ,rotation_period,semi_major_axis,surface_gravity,surface_pressure,surface_temperature,terraform_state,tidal_lock,volcanism,discovered,mapped];
-
-                 execute(&connection,sql,params);
-
+                //language=postgresql
+                let sql = "
+                  INSERT INTO body (timestamp, system_address, id, name, ascending_node, axial_tilt, atmosphere, distance_from_arrival_ls,
+                  eccentricity, landable, mass_em, mean_anomaly, orbital_inclination, orbital_period, periapsis, class,
+                  radius, rotation_period, semi_major_axis, surface_gravity,
+                  surface_pressure, surface_temperature, terraform_state, tidal_lock, volcanism, discovered, mapped,odyssey)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+ON CONFLICT (system_address,id,odyssey) DO UPDATE SET
+                          timestamp                = excluded.timestamp,
+                          system_address              = excluded.system_address,
+                          id                       = excluded.id,
+                          name                     = excluded.name,
+                          ascending_node           = excluded.ascending_node,
+                          axial_tilt               = excluded.axial_tilt,
+                          atmosphere               = excluded.atmosphere,
+                          distance_from_arrival_ls = excluded.distance_from_arrival_ls,
+                          eccentricity             = excluded.eccentricity,
+                          landable                 = excluded.landable,
+                          mass_em                  = excluded.mass_em,
+                          mean_anomaly             = excluded.mean_anomaly,
+                          orbital_inclination      = excluded.orbital_inclination,
+                          orbital_period           = excluded.orbital_period,
+                          periapsis                = excluded.periapsis,
+                          class                    = excluded.class,
+                          radius                   = excluded.radius,
+                          rotation_period          = excluded.rotation_period,
+                          semi_major_axis          = excluded.semi_major_axis,
+                          surface_gravity          = excluded.surface_gravity,
+                          surface_pressure         = excluded.surface_pressure,
+                          surface_temperature      = excluded.surface_temperature,
+                          terraform_state          = excluded.terraform_state,
+                          tidal_lock               = excluded.tidal_lock,
+                          volcanism                = excluded.volcanism,
+                          discovered               = excluded.discovered,
+                          mapped                   = excluded.mapped,
+                          odyssey                  = excluded.odyssey;";
+                match client.lock().await.execute(sql, &[
+                    &timestamp, &system_address, &id, &name, &ascending_node, &axial_tilt, &atmosphere, &distance_from_arrival_ls,
+                    &eccentricity, &landable, &mass_em, &mean_anomaly, &orbital_inclination, &orbital_period, &periapsis, &class, &radius,
+                    &rotation_period, &semi_major_axis, &surface_gravity, &surface_pressure, &surface_temperature, &terraform_state, &tidal_lock,
+                    &volcanism, &discovered, &mapped, &odyssey
+                ]).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        if !err.to_string().contains("violates foreign key constraint") {
+                            panic!("{}", err);
+                        }
+                    }
+                }
                 {
                     //Body composition
-                    let delete = "DELETE FROM body_composition WHERE body_id=? and system_name=?";
-                    let params = params![
-                                    id,system_name
-                                ];
-                    execute(&connection,delete,params);
+                    //language=postgresql
+                    let delete = "DELETE FROM body_composition WHERE body_id=$1 and system_address=$2 and odyssey=$3;";
+                    client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
                 }
                 {
                     //Body materials
-                    let delete = "DELETE FROM body_materials WHERE body_id=? and system_name=?";
-                    let params = params![
-                                    id,system_name
-                                ];
-                    execute(&connection,delete,params);
+                    //language=postgresql
+                    let delete = "DELETE FROM body_materials WHERE body_id=$1 and system_address=$2 and odyssey=$3";
+                    client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
                 }
                 {
                     //Body composition
@@ -263,12 +298,23 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     while !entry_option.is_none() {
                         let composition = entry_option.unwrap();
                         let name = composition.0;
-                        let percentage = composition.1.to_string();
-
-                        let sql = "INSERT INTO body_composition VALUES (?,?,?,?,?)";
-                        let params = params![timestamp,id,system_name,name,percentage];
-
-                         execute(&connection,sql,params);
+                        let percentage = composition.1.as_f32().unwrap();
+                        //language=postgresql
+                        let sql = "INSERT INTO body_composition (timestamp, body_id, system_address, name, percentage, odyssey) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(system_address,odyssey,body_id) DO UPDATE SET
+                                                                                                                                                                                  timestamp = excluded.timestamp,
+                                                                                                                                                                                  body_id = excluded.body_id,
+                                                                                                                                                                                  system_address = excluded.system_address,
+                                                                                                                                                                                  name = excluded.name,
+                                                                                                                                                                                  percentage = excluded.percentage,
+                                                                                                                                                                                  odyssey = excluded.odyssey;";
+                        match client.lock().await.execute(sql, &[&timestamp, &id, &system_address, &name, &percentage, &odyssey]).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                if !err.to_string().contains("violates foreign key constraint") {
+                                    panic!("{}", err);
+                                }
+                            }
+                        }
 
                         entry_option = composition_entries.next();
                     }
@@ -279,24 +325,79 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     // "Materials":[{"Name":"iron","Percent":21.13699},{"Name":"nickel","Percent":15.987134},{"Name":"sulphur","Percent":15.03525},{"Name":"carbon","Percent":12.643088},{"Name":"chromium","Percent":9.506006},{"Name":"manganese","Percent":8.729361},{"Name":"phosphorus","Percent":8.094321},
                     for i in 0..message["Materials"].len() {
                         let name = message["Materials"][i]["Name"].to_string();
-                        let percentage = message["Materials"][i]["Percent"].to_string();
-
-                        let sql = "INSERT INTO body_materials VALUES (?,?,?,?,?)";
-                        let params = params![timestamp,id,system_name,name,percentage];
-
-                         execute(&connection,sql,params);
+                        let percentage = message["Materials"][i]["Percent"].as_f32().unwrap();
+                        //language=postgresql
+                        let sql = "INSERT INTO body_materials (timestamp, body_id, system_address, name, percentage, odyssey) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (system_address,body_id,name,odyssey) DO UPDATE SET
+                                                                                                                                                                                      timestamp = excluded.timestamp,
+                                                                                                                                                                                      body_id = excluded.body_id,
+                                                                                                                                                                                      system_address = excluded.system_address,
+                                                                                                                                                                                      name = excluded.name,
+                                                                                                                                                                                      percentage = excluded.percentage,
+                                                                                                                                                                                      odyssey = excluded.odyssey;";
+                        match client.lock().await.execute(sql, &[&timestamp, &id, &system_address, &name, &percentage, &odyssey]).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                if !err.to_string().contains("violates foreign key constraint") {
+                                    panic!("{}", err);
+                                }
+                            }
+                        }
                     }
                 }
             } else {
-                //Star
-                let sql = "INSERT OR REPLACE INTO star VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-                let params = params![
-                                timestamp,system_name,name,id,absolute_magnitude,age_my,ascending_node,axial_tilt,distance_from_arrival_ls,eccentricity,
-                                luminosity,mean_anomaly,orbital_inclination,orbital_period,periapsis,radius,rotation_period,semi_major_axis,star_type,stellar_mass,subclass,
-                                surface_temperature,discovered,mapped
-                            ];
+                //Stars only
+                let absolute_magnitude = message["AbsoluteMagnitude"].as_f32();
+                let age_my = message["Age_MY"].as_i32();
+                let luminosity = message["Luminosity"].to_string();
+                let star_type = message["StarType"].to_string();
+                let stellar_mass = message["StellarMass"].as_f32();
+                let subclass = message["Subclass"].as_i32().unwrap();
 
-                 execute(&connection,sql,params);
+                //Star
+                //language=postgresql
+                let sql = "INSERT INTO star (timestamp, system_address, name, id, absolute_magnitude, age_my, ascending_node, axial_tilt,
+                  distance_from_arrival_ls, eccentricity, luminosity, mean_anomaly, orbital_inclination, orbital_period,
+                  periapsis, radius, rotation_period, semi_major_axis, type, stellar_mass, subclass,
+                  surface_temperature, discovered, mapped,odyssey)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+ON CONFLICT (odyssey,id,system_address) DO UPDATE SET
+                          timestamp                = excluded.timestamp,
+                          system_address              = excluded.system_address,
+                          name                     = excluded.name,
+                          id                       = excluded.id,
+                          absolute_magnitude       = excluded.absolute_magnitude,
+                          age_my                   = excluded.age_my,
+                          ascending_node           = excluded.ascending_node,
+                          axial_tilt               = excluded.axial_tilt,
+                          distance_from_arrival_ls = excluded.distance_from_arrival_ls,
+                          eccentricity             = excluded.eccentricity,
+                          luminosity               = excluded.luminosity,
+                          mean_anomaly             = excluded.mean_anomaly,
+                          orbital_inclination      = excluded.orbital_inclination,
+                          orbital_period           = excluded.orbital_period,
+                          periapsis                = excluded.periapsis,
+                          radius                   = excluded.radius,
+                          rotation_period          = excluded.rotation_period,
+                          semi_major_axis          = excluded.semi_major_axis,
+                          type                     = excluded.type,
+                          stellar_mass             = excluded.stellar_mass,
+                          subclass                 = excluded.subclass,
+                          surface_temperature      = excluded.surface_temperature,
+                          discovered               = excluded.discovered,
+                          mapped                   = excluded.mapped,
+                          odyssey                  = excluded.odyssey;";
+                match client.lock().await.execute(sql, &[
+                    &timestamp, &system_address, &name, &id, &absolute_magnitude, &age_my, &ascending_node, &axial_tilt, &distance_from_arrival_ls, &eccentricity,
+                    &luminosity, &mean_anomaly, &orbital_inclination, &orbital_period, &periapsis, &radius, &rotation_period, &semi_major_axis, &star_type, &stellar_mass, &subclass,
+                    &surface_temperature, &discovered, &mapped, &odyssey
+                ]).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        if !err.to_string().contains("violates foreign key constraint") {
+                            panic!("{}", err);
+                        }
+                    }
+                }
             }
 
             match message["ScanType"].as_str().unwrap() {
@@ -379,7 +480,6 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
                     // "AutoScan","SemiMajorAxis":10693013072013.855,"StarPos":[4771.21875,66.09375,-5538.71875],"StarSystem":"Hypiae Aip NK-W b29-7","StarType":"L",
                     // "StellarMass":0.117188,"Subclass":8,"SurfaceTemperature":1407.0,"SystemAddress":16128005119233,"WasDiscovered":false,"WasMapped":false,
                     // "event":"Scan","horizons":true,"odyssey":true,"timestamp":"2023-06-15T13:13:27Z"}
-
                 }
                 "NavBeaconDetail" => {
                     //{"AscendingNode":59.981854,"Atmosphere":"thin carbon dioxide atmosphere","AtmosphereComposition":[{"Name":"CarbonDioxide","Percent":99.009911},{"Name":"SulphurDioxide","Percent":0.990099}],"AtmosphereType":"CarbonDioxide","AxialTilt":-0.46992,"BodyID":43,"BodyName":"Iota Horologii A 7 d","Composition":{"Ice":0,"Metal":0.089416,"Rock":0.910584},"DistanceFromArrivalLS":2189.493581,"Eccentricity":0.00291,"Landable":true,"MassEM":0.000919,"Materials":[{"Name":"iron","Percent":18.952173},{"Name":"sulphur","Percent":18.461615},{"Name":"carbon","Percent":15.524308},{"Name":"nickel","Percent":14.334629},{"Name":"phosphorus","Percent":9.938927},{"Name":"chromium","Percent":8.523421},{"Name":"germanium","Percent":5.470057},{"Name":"zinc","Percent":5.150491},{"Name":"cadmium","Percent":1.471722},{"Name":"yttrium","Percent":1.131991},{"Name":"tungsten","Percent":1.040665}],"MeanAnomaly":140.729594,"OrbitalInclination":-0.13871,"OrbitalPeriod":428179.824352,"Parents":[{"Planet":37},{"Null":28},{"Star":1},{"Null":0}],"Periapsis":77.930051,"PlanetClass":"Rocky body","Radius":684243.125,"RotationPeriod":428190.902071,"ScanType":"NavBeaconDetail","SemiMajorAxis":444461178.779602,"StarPos":[29.4375,-47.625,-0.9375],"StarSystem":"Iota Horologii","SurfaceGravity":0.782219,"SurfacePressure":1201.276978,"SurfaceTemperature":162.988632,"SystemAddress":422810995051,"TerraformState":"","TidalLock":true,"Volcanism":"","WasDiscovered":true,"WasMapped":true,"event":"Scan","horizons":true,"odyssey":true,"timestamp":"2023-06-26T16:02:15Z"}
@@ -597,132 +697,151 @@ pub fn handle_event(json: JsonValue, connection: Connection) {
         "Fileheader" => {}
         "Shutdown" => {}
         "None" | "" | _ => {
-            let timestamp = message["timestamp"].to_string();
-            let market_id = message["marketId"].to_string();
+            let market_id = message["marketId"].as_i64().unwrap();
             let station_name = message["stationName"].to_string();
             let system_name = message["systemName"].to_string();
-            if !message["ships"].is_null(){
+            let odyssey = message["odyssey"].as_bool().unwrap();
+            if !message["ships"].is_null() {
                 //ships
                 {
-                    let sql = "INSERT OR REPLACE INTO station VALUES (?,?,?,?)";
-                    let params = params![
-                        timestamp,
-                        station_name,
-                        market_id,
-                        system_name
-                    ];
-                     execute(&connection,sql,params);
-                }
-                {
-                    let delete = "DELETE FROM ship WHERE market_id=?";
-                    let params = params![
-                        market_id
-                    ];
-                    execute(&connection,delete,params);
-                }
-                for i in 0..message["ships"].len() {
-                    let insert = "INSERT INTO ship VALUES (?,?,?)";
-                    let params = params![
-                        timestamp,
-                        market_id,
-                        message["ships"][i].to_string()
-                    ];
-
-                     execute(&connection,insert,params);
-                }
-            }else{
-            if !message["modules"].is_null(){
-                //modules
-                {
-                    let sql = "INSERT OR REPLACE INTO station VALUES (?,?,?,?)";
-                    let params = params![
-                        timestamp,
-                        station_name,
-                        market_id,
-                        system_name
-                    ];
-                     execute(&connection,sql,params);
-                }
-                {
-                    let delete = "DELETE FROM module WHERE market_id=?";
-                    let params = params![
-                        market_id
-                    ];
-                    execute(&connection,delete,params);
-                }
-                for i in 0..message["modules"].len() {
-                    let insert = "INSERT INTO module VALUES (?,?,?)";
-                    let params = params![
-                        timestamp,
-                        market_id,
-                        message["modules"][i].to_string()
-                    ];
-                    execute(&connection,insert,params);
-
-                }
-            }else{
-            if !message["commodities"].is_null(){
-                //commodities
-                {
-                    let sql = "INSERT OR REPLACE INTO station VALUES (?,?,?,?)";
-                    let params = params![
-                        timestamp,
-                        station_name,
-                        market_id,
-                        system_name
-                    ];
-                    execute(&connection,sql,params);
-                }
-                {
-                    let delete = "DELETE FROM commodity WHERE market_id=?";
-                    let params = params![
-                        market_id
-                    ];
-                    execute(&connection,delete,params);
-                }
-                for i in 0..message["commodities"].len() {
-                    let insert = "INSERT INTO commodity VALUES (?,?,?,?,?,?,?,?,?)";
-                    let params = params![
-                        timestamp,
-                        market_id,
-                        message["commodities"][i]["name"].to_string(),
-                        message["commodities"][i]["buyPrice"].to_string(),
-                        message["commodities"][i]["sellPrice"].to_string(),
-                        message["commodities"][i]["meanPrice"].to_string(),
-                        message["commodities"][i]["demandBracket"].to_string(),
-                        message["commodities"][i]["stock"].to_string(),
-                        message["commodities"][i]["stockBracket"].to_string()
-                    ];
-
-                     execute(&connection,insert,params);
-                }
-            }else {
-                warn!("Unknown message: {json}");
-            }}}
-        }
-    }
-}
-
-fn execute(connection: &Connection,sql: &str, params: &[&dyn ToSql]){
-    match connection.execute(sql, params) {
-        Ok(_) => {}
-        Err(err) => {
-            match err {
-                Error::SqliteFailure(err, string) => {
-                    match string {
-                        None => {
-                            panic!("{}", err);
-                        }
-                        Some(string) => {
-                            if string.contains("database is locked") {
-                                sleep(Duration::from_secs(1));
-                                execute(connection,sql,params);
+                    //language=postgresql
+                    let sql = "INSERT INTO station VALUES ($1,$2,$3,$4,$5) ON CONFLICT (market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, name = excluded.name, market_id = excluded.market_id, system_name = excluded.system_name;";
+                    match client.lock().await.execute(sql, &[
+                        &timestamp,
+                        &station_name,
+                        &market_id,
+                        &system_name,
+                        &odyssey
+                    ]).await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            if !err.to_string().contains("violates foreign key constraint") {
+                                panic!("{}", err);
                             }
                         }
                     }
                 }
-                _ => {
-                    panic!("{}", err);
+                {
+                    //language=postgresql
+                    let delete = "DELETE FROM ship WHERE market_id=$1 and odyssey=$2;";
+                    client.lock().await.execute(delete, &[
+                        &market_id, &odyssey
+                    ]).await.unwrap();
+                }
+                for i in 0..message["ships"].len() {
+                    //language=postgresql
+                    let insert = "INSERT INTO ship (timestamp, market_id, ship, odyssey) VALUES ($1,$2,$3,$4)";
+                    match client.lock().await.execute(insert, &[
+                        &timestamp,
+                        &market_id,
+                        &message["ships"][i].to_string(),
+                        &odyssey
+                    ]).await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            if !err.to_string().contains("violates foreign key constraint") {
+                                panic!("{}", err);
+                            }
+                        }
+                    }
+                }
+            } else {
+                if !message["modules"].is_null() {
+                    //modules
+                    {
+                        //language=postgresql
+                        let sql = "INSERT INTO station (timestamp, name, market_id, system_name, odyssey) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, name = excluded.name, market_id = excluded.market_id, system_name = excluded.system_name, odyssey = excluded.odyssey;";
+                        match client.lock().await.execute(sql, &[
+                            &timestamp,
+                            &station_name,
+                            &market_id,
+                            &system_name,
+                            &odyssey
+                        ]).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                if !err.to_string().contains("violates foreign key constraint") {
+                                    panic!("{}", err);
+                                }
+                            }
+                        }
+                    }
+                    {
+                        //language=postgresql
+                        let delete = "DELETE FROM module WHERE market_id=$1 and odyssey=$2;";
+                        client.lock().await.execute(delete, &[&market_id, &odyssey]).await.unwrap();
+                    }
+                    for i in 0..message["modules"].len() {
+                        //language=postgresql
+                        let insert = "INSERT INTO module VALUES ($1,$2,$3,$4)";
+                        match client.lock().await.execute(insert, &[
+                            &timestamp,
+                            &market_id,
+                            &message["modules"][i].to_string(),
+                            &odyssey
+                        ]).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                if !err.to_string().contains("violates foreign key constraint") {
+                                    panic!("{}", err);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if !message["commodities"].is_null() {
+                        //commodities
+                        {
+                            //language=postgresql
+                            let sql = "INSERT INTO station VALUES ($1,$2,$3,$4,$5) ON CONFLICT (market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, name = excluded.name, market_id = excluded.market_id, system_name = excluded.system_name;";
+                            match client.lock().await.execute(sql, &[
+                                &timestamp,
+                                &station_name,
+                                &market_id,
+                                &system_name,
+                                &odyssey
+                            ]).await {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    if !err.to_string().contains("violates foreign key constraint") {
+                                        panic!("{}", err);
+                                    }
+                                }
+                            }
+                        }
+                        {
+                            //language=postgresql
+                            let delete = "DELETE FROM commodity WHERE market_id=$1 and odyssey=$2;";
+                            client.lock().await.execute(delete, &[&market_id, &odyssey]).await.unwrap();
+                        }
+                        for i in 0..message["commodities"].len() {
+                            //language=postgresql
+                            let insert = "INSERT INTO commodity VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (name,market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, market_id = excluded.market_id, name = excluded.name, buy_price = excluded.buy_price, sell_price = excluded.sell_price,
+                                                                                                                     mean_price = excluded.mean_price, demand_bracket = excluded.demand_bracket, stock = excluded.stock, stock_bracket = excluded.stock_bracket, odyssey = excluded.odyssey;";
+
+                            match client.lock().await.execute(insert, &[
+                                &timestamp,
+                                &market_id,
+                                &message["commodities"][i]["name"].to_string(),
+                                &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
+                                &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
+                                &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
+                                &message["commodities"][i]["demandBracket"].as_i32(),
+                                &message["commodities"][i]["stock"].as_i32().unwrap(),
+                                &message["commodities"][i]["stockBracket"].as_i32(),
+                                &odyssey
+                            ]).await {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    if !err.to_string().contains("violates foreign key constraint") {
+                                        panic!("{}", err);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        warn!("Unknown message: {json}");
+                    }
                 }
             }
         }

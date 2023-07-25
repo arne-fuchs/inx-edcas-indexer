@@ -1,21 +1,18 @@
 mod event_handler;
 
-use std::error::Error;
-use std::fs::File;
-use std::ops::Deref;
-use std::path::PathBuf;
+
+use std::sync::Arc;
 use dotenv::dotenv;
-use iota_client::{Client, MqttEvent, MqttPayload, Result, Topic};
-use std::sync::{mpsc::channel, Arc, Mutex};
-use std::{io, thread};
+use iota_client::{Client, MqttEvent, MqttPayload, Topic};
+use std::io;
 use std::io::Read;
-use std::time::Duration;
-use async_std::task;
+use std::sync::mpsc::channel;
 use flate2::read::ZlibDecoder;
 use iota_client::block::Block;
 use iota_client::block::payload::Payload;
 use log::LevelFilter::Debug;
-use rusqlite::Connection;
+use tokio::sync::Mutex;
+use tokio_postgres::NoTls;
 
 #[tokio::main]
 async fn main() {
@@ -31,21 +28,37 @@ async fn main() {
         .finish();
     fern_logger::logger_init(config).unwrap();
 
-    let connection = Connection::open(std::env::var("DATABASE_PATH").unwrap()).unwrap();
-    connection.busy_timeout(Duration::from_secs(5)).unwrap();
-    let script = std::fs::read_to_string("createTables.sql").unwrap();
-    connection.execute_batch(&script).unwrap();
+    let username = std::env::var("DATABASE_USER").unwrap();
+    let password = std::env::var("DATABASE_PASSWORD").unwrap();
+    let server = std::env::var("DATABASE_SERVER").unwrap();
+    let port = std::env::var("DATABASE_PORT").unwrap();
+    let database = std::env::var("DATABASE_NAME").unwrap();
 
-    let client = Client::builder()
+    let connection_string = format!("postgresql://{username}:{password}@{server}:{port}/{database}");
+
+    let (client, connection) = tokio_postgres::connect(connection_string.as_str(), NoTls).await.unwrap();
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
+    let script = std::fs::read_to_string("createTables.sql").unwrap();
+    client.batch_execute(&script).await.unwrap();
+
+    let shareable_client = Arc::new(Mutex::new(client));
+
+    let node = Client::builder()
         .with_node(std::env::var("NODE_URL").unwrap().as_str()).unwrap()
         .with_pow_worker_count(std::env::var("NUM_OF_WORKERS").unwrap().parse().unwrap())
         .with_local_pow(true)
         .finish().unwrap();
 
     let (tx, rx) = channel();
-    let tx = Arc::new(Mutex::new(tx));
+    let tx = Arc::new(std::sync::Mutex::new(tx));
 
-    let mut event_rx = client.mqtt_event_receiver();
+    let mut event_rx = node.mqtt_event_receiver();
     tokio::spawn(async move {
         while event_rx.changed().await.is_ok() {
             let event = event_rx.borrow();
@@ -59,7 +72,7 @@ async fn main() {
     let tags = vec![hex::encode("EDDN"),hex::encode("SCAN"),hex::encode("FSDJUMP"),hex::encode("LOCATION"),hex::encode("CARRIERJUMP")];
     let topics = tags.iter().map(|tag| Topic::try_from(format!("blocks/tagged-data/0x{tag}")).unwrap()).collect();
     println!("Listening topics: {:?}",topics);
-    client
+    node
         .subscribe(
             topics,
             move |event| {
@@ -67,8 +80,9 @@ async fn main() {
                     MqttPayload::Json(val) => println!("{}", serde_json::to_string(&val).unwrap()),
                     MqttPayload::Block(block) => {
                         let local_block = block.clone();
-                        thread::spawn(move || {
-                            handle_block(local_block);
+                        let client_clone = shareable_client.clone();
+                        tokio::spawn( async move {
+                            handle_block(local_block,client_clone).await;
                         });
                     }
                     MqttPayload::MilestonePayload(ms) => println!("{ms:?}"),
@@ -83,7 +97,7 @@ async fn main() {
 }
 
 
-fn handle_block(block: Block) {
+async fn handle_block(block: Block,client: Arc<Mutex<tokio_postgres::Client>>) {
     match block.payload() {
         None => {}
         Some(payload) => {
@@ -98,16 +112,14 @@ fn handle_block(block: Block) {
                     }
 
                     let data = tagged_data.data().to_vec();
-                    let mut message = decode_reader(data).unwrap();
+                    let message = decode_reader(data).unwrap();
                     let result = json::parse(message.as_str());
                     match result {
                         Ok(json) => {
                             //let message = json["message"].clone();
                             //println!("{message}");
-                            //TODO Move the database path to global variable
-                            let connection = Connection::open(std::env::var("DATABASE_PATH").unwrap()).unwrap();
-                            connection.busy_timeout(Duration::from_secs(10)).unwrap();
-                            event_handler::handle_event(json,connection);
+                            //println!("{}",&json);
+                            event_handler::handle_event(json,client).await;
                         }
                         Err(_) => {}
                     }
