@@ -147,7 +147,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                     ).await {
                         Ok(_) => {}
                         Err(err) => {
-                            if !err.to_string().contains("violates foreign key constraint") {
+                            if !err.to_string().contains("violates foreign key constraint") || !err.to_string().contains("duplicate key value violates unique constraint") {
                                 panic!("{}", err);
                             }
                         }
@@ -225,17 +225,16 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
 
             let odyssey = message["odyssey"].as_bool().unwrap_or(true);
 
-
             if message["StarType"].is_null() {
                 //Body
                 //language=postgresql
                 let sql = "
-                  INSERT INTO body (timestamp, system_address, id, name, ascending_node, axial_tilt, atmosphere, distance_from_arrival_ls,
-                  eccentricity, landable, mass_em, mean_anomaly, orbital_inclination, orbital_period, periapsis, class,
-                  radius, rotation_period, semi_major_axis, surface_gravity,
-                  surface_pressure, surface_temperature, terraform_state, tidal_lock, volcanism, discovered, mapped,odyssey)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-ON CONFLICT (system_address,id,odyssey) DO UPDATE SET
+                    INSERT INTO body (timestamp, system_address, id, name, ascending_node, axial_tilt, atmosphere, distance_from_arrival_ls,
+                    eccentricity, landable, mass_em, mean_anomaly, orbital_inclination, orbital_period, periapsis, class,
+                    radius, rotation_period, semi_major_axis, surface_gravity,
+                    surface_pressure, surface_temperature, terraform_state, tidal_lock, volcanism, discovered, mapped,odyssey)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+                    ON CONFLICT (system_address,id,odyssey) DO UPDATE SET
                           timestamp                = excluded.timestamp,
                           system_address              = excluded.system_address,
                           id                       = excluded.id,
@@ -300,13 +299,14 @@ ON CONFLICT (system_address,id,odyssey) DO UPDATE SET
                         let name = composition.0;
                         let percentage = composition.1.as_f32().unwrap();
                         //language=postgresql
-                        let sql = "INSERT INTO body_composition (timestamp, body_id, system_address, name, percentage, odyssey) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(system_address,odyssey,body_id) DO UPDATE SET
-                                                                                                                                                                                  timestamp = excluded.timestamp,
-                                                                                                                                                                                  body_id = excluded.body_id,
-                                                                                                                                                                                  system_address = excluded.system_address,
-                                                                                                                                                                                  name = excluded.name,
-                                                                                                                                                                                  percentage = excluded.percentage,
-                                                                                                                                                                                  odyssey = excluded.odyssey;";
+                        let sql = "INSERT INTO body_composition (timestamp, body_id, system_address, name, percentage, odyssey)
+                            VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(system_address,odyssey,body_id) DO UPDATE SET
+                            timestamp = excluded.timestamp,
+                            body_id = excluded.body_id,
+                            system_address = excluded.system_address,
+                            name = excluded.name,
+                            percentage = excluded.percentage,
+                            odyssey = excluded.odyssey;";
                         match client.lock().await.execute(sql, &[&timestamp, &id, &system_address, &name, &percentage, &odyssey]).await {
                             Ok(_) => {}
                             Err(err) => {
@@ -356,11 +356,11 @@ ON CONFLICT (system_address,id,odyssey) DO UPDATE SET
                 //Star
                 //language=postgresql
                 let sql = "INSERT INTO star (timestamp, system_address, name, id, absolute_magnitude, age_my, ascending_node, axial_tilt,
-                  distance_from_arrival_ls, eccentricity, luminosity, mean_anomaly, orbital_inclination, orbital_period,
-                  periapsis, radius, rotation_period, semi_major_axis, type, stellar_mass, subclass,
-                  surface_temperature, discovered, mapped,odyssey)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-ON CONFLICT (odyssey,id,system_address) DO UPDATE SET
+                    distance_from_arrival_ls, eccentricity, luminosity, mean_anomaly, orbital_inclination, orbital_period,
+                    periapsis, radius, rotation_period, semi_major_axis, type, stellar_mass, subclass,
+                    surface_temperature, discovered, mapped,odyssey)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+                    ON CONFLICT (odyssey,id,system_address) DO UPDATE SET
                           timestamp                = excluded.timestamp,
                           system_address              = excluded.system_address,
                           name                     = excluded.name,
@@ -399,6 +399,24 @@ ON CONFLICT (odyssey,id,system_address) DO UPDATE SET
                     }
                 }
             }
+
+            if !message["Parents"].is_null() {
+
+                for i in 0..message["Parents"].len(){
+                    let entry = message["Parents"][0].entries().next().unwrap();
+                    //language=postgresql
+                    let sql = "INSERT INTO parents(system_address, body_id, parent_type,parent_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING";
+                    match client.lock().await.execute(sql,&[&system_address,&id,&entry.0,&entry.1.as_i32()]).await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            if !err.to_string().contains("violates foreign key constraint") {
+                                panic!("{}", err);
+                            }
+                        }
+                    }
+                }
+            }
+
 
             match message["ScanType"].as_str().unwrap() {
                 "Detailed" => {

@@ -279,3 +279,15 @@ create table if not exists commodity
     primary key (market_id, name, odyssey),
     foreign key (market_id, odyssey) references station (market_id, odyssey)
 );
+
+create table if not exists parents
+(
+    system_address bigint NOT NULL,
+    body_id        integer NOT NULL,
+    parent_type    varchar,
+    parent_id      integer,
+
+    unique (system_address,body_id,parent_id),
+    primary key (system_address,body_id,parent_id),
+    foreign key (system_address,body_id) references body(system_address,id)
+);
