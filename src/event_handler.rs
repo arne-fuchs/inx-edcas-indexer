@@ -403,7 +403,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
             if !message["Parents"].is_null() {
 
                 for i in 0..message["Parents"].len(){
-                    let entry = message["Parents"][0].entries().next().unwrap();
+                    let entry = message["Parents"][i].entries().next().unwrap();
                     //language=postgresql
                     let sql = "INSERT INTO parents(system_address, body_id, parent_type,parent_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING";
                     match client.lock().await.execute(sql,&[&system_address,&id,&entry.0,&entry.1.as_i32()]).await {
