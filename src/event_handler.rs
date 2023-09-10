@@ -1,3 +1,4 @@
+use std::process;
 use std::str::FromStr;
 use std::sync::Arc;
 use chrono::Utc;
@@ -17,6 +18,10 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
     match event_result {
         None => {}
         Some(result) => { event = result; }
+    }
+
+    if client.lock().await.is_closed(){
+        process::exit(10);
     }
 
     match event {
