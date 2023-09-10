@@ -21,7 +21,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
     }
 
     if client.lock().await.is_closed(){
-        process::exit(10);
+        process::exit(20);
     }
 
     match event {
