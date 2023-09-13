@@ -528,7 +528,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                     let class = ring["RingClass"].as_str().unwrap();
 
                     //language=postgresql
-                    let sql = "INSERT INTO ring (timestamp, system_address, name, inner_rad, outer_rad, mass_mt, class, odyssey, body_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)";
+                    let sql = "INSERT INTO ring (timestamp, system_address, name, inner_rad, outer_rad, mass_mt, class, odyssey, body_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (system_address, body_id, odyssey) DO NOTHING";
 
                         match client.lock().await.execute(sql,&[&timestamp,&system_address,&name,&inner_rad,&outer_rad,&mass_mt,&class,&odyssey,&id]).await {
                             Ok(_) => {}
