@@ -7,6 +7,10 @@ use log::warn;
 use tokio::sync::Mutex;
 
 pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Client>>) {
+    if client.lock().await.is_closed(){
+        process::exit(20);
+    }
+
     let timestamp = Utc::now().timestamp();
     let mut message = json.clone();
     if !json["message"].is_null() {
@@ -30,9 +34,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
         Some(result) => { event = result; }
     }
 
-    if client.lock().await.is_closed(){
-        process::exit(20);
-    }
+    let odyssey = message["odyssey"].as_bool().unwrap_or(true);
 
     match event {
         //Navigation
@@ -99,8 +101,6 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                 let x: f32 = f32::from_str(string_split.next().unwrap()).unwrap();
                 let y: f32 = f32::from_str(string_split.next().unwrap()).unwrap();
                 let z: f32 = f32::from_str(string_split.next().unwrap()).unwrap();
-
-                let odyssey = message["odyssey"].as_bool().unwrap_or(true);
 
                 //language=postgresql
                 let insert = "
@@ -195,15 +195,62 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
         "FSSAllBodiesFound" => {}
         //{ "timestamp":"2022-10-16T23:46:48Z", "event":"FSSDiscoveryScan", "Progress":0.680273, "BodyCount":21, "NonBodyCount":80, "SystemName":"Ogmar", "SystemAddress":84180519395914 }
         "FSSDiscoveryScan" => {}//Honk
-        //{ "timestamp":"2022-07-07T20:58:06Z", "event":"SAASignalsFound", "BodyName":"IC 2391 Sector YE-A d103 B 1", "SystemAddress":3549631072611, "BodyID":15, "Signals":[ { "Type":"$SAA_SignalType_Guardian;", "Type_Localised":"Guardian", "Count":1 }, { "Type":"$SAA_SignalType_Human;", "Type_Localised":"Menschlich", "Count":9 } ] }
-        "FSSBodySignals" | "SAASignalsFound" => {}
+        "SAAScanComplete" => {
+            //{ "timestamp":"2023-09-05T11:56:46Z", "event":"SAAScanComplete", "BodyName":"Byaa Broae IS-B d13-0 2 a", "SystemAddress":11148500979, "BodyID":4, "ProbesUsed":4, "EfficiencyTarget":6 }
+        }
+        "FSSBodySignals" | "SAASignalsFound" => {
+            //{ "timestamp":"2022-07-07T20:58:06Z", "event":"SAASignalsFound", "BodyName":"IC 2391 Sector YE-A d103 B 1", "SystemAddress":3549631072611, "BodyID":15, "Signals":[ { "Type":"$SAA_SignalType_Guardian;", "Type_Localised":"Guardian", "Count":1 },
+            // { "Type":"$SAA_SignalType_Human;", "Type_Localised":"Menschlich", "Count":9 } ] }
+
+            // { "timestamp":"2023-09-05T11:56:46Z", "event":"SAASignalsFound", "BodyName":"Byaa Broae IS-B d13-0 2 a", "SystemAddress":11148500979, "BodyID":4, "Signals":[ { "Type":"$SAA_SignalType_Biological;", "Type_Localised":"Biologisch", "Count":1 } ],
+            // "Genuses":[ { "Genus":"$Codex_Ent_Bacterial_Genus_Name;", "Genus_Localised":"Bacterium" } ] }
+
+            //{ "timestamp":"2023-09-05T11:01:35Z", "event":"FSSBodySignals", "BodyName":"Slaiyai BW-E d11-2 7", "BodyID":8, "SystemAddress":79817613411, "Signals":[ { "Type":"$SAA_SignalType_Geological;", "Type_Localised":"Geologisch", "Count":3 } ] }
+            //{ "timestamp":"2023-09-05T13:41:49Z", "event":"FSSBodySignals", "BodyName":"Byaa Broae ED-T b4-0 A 2", "BodyID":5, "SystemAddress":712562605609, "Signals":[ { "Type":"$SAA_SignalType_Biological;", "Type_Localised":"Biologisch", "Count":4 } ] }
+
+            let system_address = message["SystemAddress"].as_i64().unwrap();
+            let id = message["BodyID"].as_i32().unwrap();
+
+            if message["Signals"].len() > 0 {
+                //language=postgresql
+                let sql = "DELETE FROM body_signal WHERE system_address=$1 AND body_id=$2 AND odyssey=$3";
+                match client.lock().await.execute(sql, &[
+                    &system_address, &id, &odyssey
+                ]).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        if !err.to_string().contains("violates foreign key constraint") {
+                            panic!("{}", err);
+                        }
+                    }
+                }
+            }
+
+            for i in 0..message["Signals"].len() {
+                let signal = &message["Signals"][i];
+                let signal_type = signal["Type"].as_str().unwrap();
+                let count = signal["Count"].as_i32().unwrap();
+
+                //language=postgresql
+                let sql = "INSERT INTO body_signal (timestamp, system_address, body_id, count, type, odyssey) VALUES ($1,$2,$3,$4,$5,$6)";
+                match client.lock().await.execute(sql, &[
+                    &timestamp, &system_address, &id, &count, &signal_type, &odyssey
+                ]).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        if !err.to_string().contains("violates foreign key constraint") {
+                            panic!("{}", err);
+                        }
+                    }
+                }
+            }
+        }
         "FSSSignalDiscovered" => {
             //{ "timestamp":"2023-05-29T22:40:26Z", "event":"FSSSignalDiscovered", "SystemAddress":672296347049, "SignalName":"$MULTIPLAYER_SCENARIO80_TITLE;", "SignalName_Localised":"Unbewachtes Navigationssignal" }
             // { "timestamp":"2023-05-29T22:40:26Z", "event":"FSSSignalDiscovered", "SystemAddress":672296347049, "SignalName":"THE GENERAL MELCHETT X5W-0XL", "IsStation":true }
             //{ "timestamp":"2023-05-29T22:40:42Z", "event":"FSSSignalDiscovered", "SystemAddress":672296347049, "SignalName":"$USS_HighGradeEmissions;", "SignalName_Localised":"Unidentifizierte Signalquelle",
             // "USSType":"$USS_Type_ValuableSalvage;", "USSType_Localised":"Verschlüsselte Emissionen", "SpawningState":"", "SpawningFaction":"Murus Major Industry", "ThreatLevel":0, "TimeRemaining":707.545837 }
         }
-        "SAAScanComplete" => {}
         "Scan" => {
             //TODO Rings
             //TODO Cluster
