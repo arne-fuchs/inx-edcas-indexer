@@ -3,13 +3,16 @@ mod event_handler;
 
 use std::sync::Arc;
 use dotenv::dotenv;
-use iota_client::{Client, MqttEvent, MqttPayload, Topic};
 use std::io;
 use std::io::Read;
+use std::str::FromStr;
 use std::sync::mpsc::channel;
 use flate2::read::ZlibDecoder;
-use iota_client::block::Block;
-use iota_client::block::payload::Payload;
+use iota_sdk::client::Client;
+use iota_sdk::client::mqtt::{MqttEvent, MqttPayload, Topic};
+use iota_sdk::types::block::{Block, BlockDto};
+use iota_sdk::types::block::payload::dto::PayloadDto;
+use iota_sdk::types::block::payload::Payload;
 use log::LevelFilter::Debug;
 use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
@@ -51,14 +54,14 @@ async fn main() {
 
     let node = Client::builder()
         .with_node(std::env::var("NODE_URL").unwrap().as_str()).unwrap()
-        .with_pow_worker_count(std::env::var("NUM_OF_WORKERS").unwrap().parse().unwrap())
+        .with_pow_worker_count(usize::from_str(std::env::var("NUM_OF_WORKERS").unwrap().as_str()).unwrap())
         .with_local_pow(true)
-        .finish().unwrap();
+        .finish().await.unwrap();
 
     let (tx, rx) = channel();
     let tx = Arc::new(std::sync::Mutex::new(tx));
 
-    let mut event_rx = node.mqtt_event_receiver();
+    let mut event_rx = node.mqtt_event_receiver().await;
     tokio::spawn(async move {
         while event_rx.changed().await.is_ok() {
             let event = event_rx.borrow();
@@ -70,7 +73,7 @@ async fn main() {
     });
 
     let tags = vec![hex::encode("EDDN"),hex::encode("SCAN"),hex::encode("FSDJUMP"),hex::encode("LOCATION"),hex::encode("CARRIERJUMP")];
-    let topics = tags.iter().map(|tag| Topic::try_from(format!("blocks/tagged-data/0x{tag}")).unwrap()).collect();
+    let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{tag}")).unwrap());
     println!("Listening topics: {:?}",topics);
     node
         .subscribe(
@@ -87,6 +90,7 @@ async fn main() {
                     }
                     MqttPayload::MilestonePayload(ms) => println!("{ms:?}"),
                     MqttPayload::Receipt(receipt) => println!("{receipt:?}"),
+                    _ => {}
                 }
                 tx.lock().unwrap().send(()).unwrap();
             },
@@ -97,21 +101,21 @@ async fn main() {
 }
 
 
-async fn handle_block(block: Block,client: Arc<Mutex<tokio_postgres::Client>>) {
-    match block.payload() {
+async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>) {
+    match block.payload {
         None => {}
         Some(payload) => {
             match payload {
-                Payload::Transaction(_) => {}
-                Payload::Milestone(_) => {}
-                Payload::TreasuryTransaction(_) => {}
-                Payload::TaggedData(tagged_data) => {
-                    let tag = String::from_utf8(tagged_data.tag().to_vec()).unwrap();
+                PayloadDto::Transaction(_) => {}
+                PayloadDto::Milestone(_) => {}
+                PayloadDto::TreasuryTransaction(_) => {}
+                PayloadDto::TaggedData(tagged_data) => {
+                    let tag = String::from_utf8(tagged_data.tag.to_vec()).unwrap();
                     if tag != "EDDN".to_string() {
                         println!("{}",tag);
                     }
 
-                    let data = tagged_data.data().to_vec();
+                    let data = tagged_data.data.to_vec();
                     let message = decode_reader(data).unwrap();
                     let result = json::parse(message.as_str());
                     match result {
@@ -119,6 +123,8 @@ async fn handle_block(block: Block,client: Arc<Mutex<tokio_postgres::Client>>) {
                             //let message = json["message"].clone();
                             //println!("{message}");
                             //println!("{}",&json);
+                            //let sql = "INSERT INTO pid VALUES (address = ?)";
+                            //client.lock().await.execute(sql,&[]).await.unwrap();
                             event_handler::handle_event(json,client).await;
                         }
                         Err(_) => {}
