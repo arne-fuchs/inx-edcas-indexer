@@ -19,7 +19,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
     let max_age = Duration::hours(1);
     let time_difference = current_date_time.signed_duration_since(parsed_date_time);
     if time_difference > max_age {
-        println!("Found too old data(Current: {} Found: {}): {}",current_date_time, parsed_date_time, json);
+        //println!("Found too old data(Current: {} Found: {}): {}",current_date_time, parsed_date_time, json);
         return;
     }
 
