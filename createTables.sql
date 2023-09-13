@@ -19,7 +19,6 @@ create table if not exists system
 
     odyssey        boolean,
 
-    CONSTRAINT system_name_odyssey_unique_constraint UNIQUE (name, odyssey),
     UNIQUE (name, odyssey),
     UNIQUE (address, odyssey),
     primary key (address, odyssey)
@@ -37,7 +36,6 @@ create table if not exists system_faction
     happiness      varchar,
     odyssey        boolean,
 
-    unique (name, system_address),
     primary key (name, system_address, odyssey),
     foreign key (system_address, odyssey) references system (address, odyssey)
 );
@@ -67,7 +65,7 @@ create table if not exists faction_recovering_state
     primary key (faction, system_address, odyssey)
 );
 
-create table if not exists conflicts
+create table if not exists conflict
 (
     timestamp      bigint,
     war_type       varchar,
@@ -113,7 +111,7 @@ create table if not exists body
     mapped                   boolean,
     odyssey                  boolean,
 
-    UNIQUE (system_address, id),
+unique (id,system_address),
     primary key (id, system_address, odyssey),
     foreign key (system_address, odyssey) references system (address, odyssey)
 );
@@ -127,12 +125,11 @@ create table if not exists body_composition
     percentage     real,
     odyssey        boolean,
 
-    UNIQUE (body_id, system_address, name),
     foreign key (body_id, system_address, odyssey) references body (id, system_address, odyssey),
     primary key (body_id, system_address, odyssey)
 );
 
-create table if not exists body_materials
+create table if not exists body_material
 (
     timestamp      bigint,
     body_id        integer,
@@ -143,8 +140,7 @@ create table if not exists body_materials
 
 
     foreign key (body_id, system_address, odyssey) references body (id, system_address, odyssey),
-    primary key (body_id, system_address, name, odyssey),
-    unique (body_id, system_address, name, odyssey)
+    primary key (body_id, system_address, name, odyssey)
 );
 
 create table if not exists atmosphere_composition
@@ -156,7 +152,6 @@ create table if not exists atmosphere_composition
     percent        real,
     odyssey        boolean,
 
-    unique (system_address, body_id, odyssey),
     primary key (system_address, body_id, odyssey),
     foreign key (system_address, body_id, odyssey) references body (system_address, id, odyssey)
 );
@@ -189,7 +184,6 @@ create table if not exists star
     mapped                   boolean,
     odyssey                  boolean,
 
-    unique (system_address, id, odyssey),
     primary key (system_address, id, odyssey),
     foreign key (system_address, odyssey) references system (address, odyssey)
 );
@@ -205,13 +199,12 @@ create table if not exists ring
     class          varchar,
     odyssey        boolean,
 
-    unique (system_address, name, odyssey),
     primary key (system_address, name, odyssey),
     foreign key (system_address, odyssey) references system (address, odyssey)
 );
 
 
-create table if not exists body_signals
+create table if not exists body_signal
 (
     timestamp      bigint,
     system_address bigint,
@@ -220,7 +213,6 @@ create table if not exists body_signals
     type           varchar,
     odyssey        boolean,
 
-    unique (system_address, body_id, odyssey),
     primary key (system_address, body_id, odyssey),
     foreign key (system_address, body_id, odyssey) references body (system_address, id, odyssey)
 );
@@ -233,7 +225,6 @@ create table if not exists station
     system_name varchar,
     odyssey     boolean,
 
-    UNIQUE (market_id, odyssey),
     primary key (market_id, odyssey),
     foreign key (system_name, odyssey) references system (name, odyssey)
 );
@@ -245,7 +236,6 @@ create table if not exists ship
     ship      varchar,
     odyssey   boolean,
 
-    unique (market_id, ship, odyssey),
     primary key (market_id, ship, odyssey),
     foreign key (market_id, odyssey) references station (market_id, odyssey)
 );
@@ -257,7 +247,6 @@ create table if not exists module
     name      varchar,
     odyssey   boolean,
 
-    unique (market_id, name, odyssey),
     primary key (market_id, name, odyssey),
     foreign key (market_id, odyssey) references station (market_id, odyssey)
 );
@@ -275,19 +264,23 @@ create table if not exists commodity
     stock_bracket  integer,
     odyssey        boolean,
 
-    unique (market_id, name, odyssey),
     primary key (market_id, name, odyssey),
     foreign key (market_id, odyssey) references station (market_id, odyssey)
 );
 
-create table if not exists parents
+create table if not exists parent
 (
     system_address bigint NOT NULL,
     body_id        integer NOT NULL,
     parent_type    varchar,
     parent_id      integer,
+    odyssey        boolean,
 
-    unique (system_address,body_id,parent_id),
-    primary key (system_address,body_id,parent_id),
-    foreign key (system_address,body_id) references body(system_address,id)
+    primary key (system_address,body_id,parent_id, odyssey),
+    foreign key (system_address,body_id, odyssey) references body(system_address,id, odyssey)
 );
+
+create table if not exists pid
+(
+    pkey varchar primary key
+)

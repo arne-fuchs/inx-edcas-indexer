@@ -1,7 +1,7 @@
 use std::process;
 use std::str::FromStr;
 use std::sync::Arc;
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use json::JsonValue;
 use log::warn;
 use tokio::sync::Mutex;
@@ -11,6 +11,16 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
     let mut message = json.clone();
     if !json["message"].is_null() {
         message = json["message"].clone();
+    }
+
+    //Check if data is too old (false data)
+    let parsed_date_time = DateTime::parse_from_rfc3339(message["timestamp"].as_str().unwrap()).unwrap();
+    let current_date_time = Utc::now();
+    let max_age = Duration::hours(1);
+    let time_difference = current_date_time.signed_duration_since(parsed_date_time);
+    if time_difference > max_age {
+        println!("Found too old data(Current: {} Found: {}): {}",current_date_time, parsed_date_time, json);
+        return;
     }
 
     let event_result = message["event"].as_str();
@@ -283,22 +293,18 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                 }
                 {
                     //Body composition
-                    //language=postgresql
-                    let delete = "DELETE FROM body_composition WHERE body_id=$1 and system_address=$2 and odyssey=$3;";
-                    client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
-                }
-                {
-                    //Body materials
-                    //language=postgresql
-                    let delete = "DELETE FROM body_materials WHERE body_id=$1 and system_address=$2 and odyssey=$3";
-                    client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
-                }
-                {
-                    //Body composition
                     // "Composition":{"Ice":0,"Metal":0.327036,"Rock":0.672964},
 
                     let mut composition_entries = message["Composition"].entries();
                     let mut entry_option = composition_entries.next();
+
+                    //Clear existing data if exists
+                    if !entry_option.is_none() {
+                        //language=postgresql
+                        let delete = "DELETE FROM body_composition WHERE body_id=$1 and system_address=$2 and odyssey=$3;";
+                        client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
+                    }
+
                     while !entry_option.is_none() {
                         let composition = entry_option.unwrap();
                         let name = composition.0;
@@ -328,11 +334,50 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                 {
                     //Body materials
                     // "Materials":[{"Name":"iron","Percent":21.13699},{"Name":"nickel","Percent":15.987134},{"Name":"sulphur","Percent":15.03525},{"Name":"carbon","Percent":12.643088},{"Name":"chromium","Percent":9.506006},{"Name":"manganese","Percent":8.729361},{"Name":"phosphorus","Percent":8.094321},
+
+                    //Deletes old data if data is present
+                    if message["Materials"].len() > 0 {
+                        //language=postgresql
+                        let delete = "DELETE FROM body_material WHERE body_id=$1 and system_address=$2 and odyssey=$3";
+                        client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
+                    }
+
                     for i in 0..message["Materials"].len() {
                         let name = message["Materials"][i]["Name"].to_string();
                         let percentage = message["Materials"][i]["Percent"].as_f32().unwrap();
                         //language=postgresql
-                        let sql = "INSERT INTO body_materials (timestamp, body_id, system_address, name, percentage, odyssey) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (system_address,body_id,name,odyssey) DO UPDATE SET
+                        let sql = "INSERT INTO body_material (timestamp, body_id, system_address, name, percentage, odyssey) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (system_address,body_id,name,odyssey) DO UPDATE SET
+                                                                                                                                                                                      timestamp = excluded.timestamp,
+                                                                                                                                                                                      body_id = excluded.body_id,
+                                                                                                                                                                                      system_address = excluded.system_address,
+                                                                                                                                                                                      name = excluded.name,
+                                                                                                                                                                                      percentage = excluded.percentage,
+                                                                                                                                                                                      odyssey = excluded.odyssey;";
+                        match client.lock().await.execute(sql, &[&timestamp, &id, &system_address, &name, &percentage, &odyssey]).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                if !err.to_string().contains("violates foreign key constraint") {
+                                    panic!("{}", err);
+                                }
+                            }
+                        }
+                    }
+                }
+                {
+                    // "AtmosphereComposition":[ { "Name":"Hydrogen", "Percent":73.044167 }, { "Name":"Helium", "Percent":26.955832 } ],
+
+                    //Clear existing data if exists
+                    if !message["AtmosphereComposition"].len() > 0 {
+                        //language=postgresql
+                        let delete = "DELETE FROM atmosphere_composition WHERE body_id=$1 and system_address=$2 and odyssey=$3;";
+                        client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
+                    }
+
+                    for i in 0..message["AtmosphereComposition"].len() {
+                        let name = message["AtmosphereComposition"][i]["Name"].to_string();
+                        let percentage = message["AtmosphereComposition"][i]["Percent"].as_f32().unwrap();
+                        //language=postgresql
+                        let sql = "INSERT INTO atmosphere_composition (timestamp, body_id, system_address, name, percentage, odyssey) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (system_address, body_id, odyssey) DO UPDATE SET
                                                                                                                                                                                       timestamp = excluded.timestamp,
                                                                                                                                                                                       body_id = excluded.body_id,
                                                                                                                                                                                       system_address = excluded.system_address,
@@ -410,8 +455,8 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                 for i in 0..message["Parents"].len(){
                     let entry = message["Parents"][i].entries().next().unwrap();
                     //language=postgresql
-                    let sql = "INSERT INTO parents(system_address, body_id, parent_type,parent_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING";
-                    match client.lock().await.execute(sql,&[&system_address,&id,&entry.0,&entry.1.as_i32()]).await {
+                    let sql = "INSERT INTO parent(system_address, body_id, parent_type,parent_id,odyssey) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING";
+                    match client.lock().await.execute(sql,&[&system_address,&id,&entry.0,&entry.1.as_i32(),&odyssey]).await {
                         Ok(_) => {}
                         Err(err) => {
                             if !err.to_string().contains("violates foreign key constraint") {
@@ -753,7 +798,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                 }
                 for i in 0..message["ships"].len() {
                     //language=postgresql
-                    let insert = "INSERT INTO ship (timestamp, market_id, ship, odyssey) VALUES ($1,$2,$3,$4)";
+                    let insert = "INSERT INTO ship (timestamp, market_id, ship, odyssey) VALUES ($1,$2,$3,$4) ON CONFLICT (market_id, ship, odyssey) DO NOTHING;";
                     match client.lock().await.execute(insert, &[
                         &timestamp,
                         &market_id,
@@ -796,7 +841,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                     }
                     for i in 0..message["modules"].len() {
                         //language=postgresql
-                        let insert = "INSERT INTO module VALUES ($1,$2,$3,$4)";
+                        let insert = "INSERT INTO module VALUES ($1,$2,$3,$4) ON CONFLICT (market_id, name, odyssey) DO NOTHING;";
                         match client.lock().await.execute(insert, &[
                             &timestamp,
                             &market_id,
