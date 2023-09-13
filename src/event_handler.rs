@@ -252,11 +252,6 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
             // "USSType":"$USS_Type_ValuableSalvage;", "USSType_Localised":"Verschlüsselte Emissionen", "SpawningState":"", "SpawningFaction":"Murus Major Industry", "ThreatLevel":0, "TimeRemaining":707.545837 }
         }
         "Scan" => {
-            //TODO Rings
-            //TODO Cluster
-            //TODO atmosphere_composition
-            //TODO composition
-
             let system_address = message["SystemAddress"].as_i64().unwrap();
             let id = message["BodyID"].as_i32().unwrap();
             let name = message["BodyName"].to_string();
@@ -511,6 +506,38 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                             }
                         }
                     }
+                }
+            }
+
+            {
+                // "Rings":[ { "Name":"Qauthoea YF-V b58-0 A A Belt", "RingClass":"eRingClass_MetalRich", "MassMT":8.2726e+13, "InnerRad":7.0386e+08, "OuterRad":1.9273e+09 } ]
+                // "Rings":[ { "Name":"Qauthoea EV-O b48-0 A Belt", "RingClass":"eRingClass_Rocky", "MassMT":7.9405e+13, "InnerRad":7.0154e+08, "OuterRad":1.8042e+09 }, { "Name":"Qauthoea EV-O b48-0 B Belt", "RingClass":"eRingClass_Metalic", "MassMT":5.208e+13, "InnerRad":3.8825e+09, "OuterRad":9.8609e+10 } ],
+                if !message["Rings"].len() > 0{
+                    //language=postgresql
+                    let delete = "DELETE FROM ring WHERE body_id=$1 and system_address=$2 and odyssey=$3;";
+                    client.lock().await.execute(delete, &[&id, &system_address, &odyssey]).await.unwrap();
+                }
+
+                for i in 0..message["Rings"].len() {
+                    let ring = &message["Rings"][i];
+
+                    let name = ring["Name"].as_str().unwrap();
+                    let inner_rad = ring["InnerRad"].as_f32().unwrap();
+                    let outer_rad = ring["OuterRad"].as_f32().unwrap();
+                    let mass_mt = ring["MassMT"].as_f32().unwrap();
+                    let class = ring["RingClass"].as_str().unwrap();
+
+                    //language=postgresql
+                    let sql = "INSERT INTO ring (timestamp, system_address, name, inner_rad, outer_rad, mass_mt, class, odyssey, body_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)";
+
+                        match client.lock().await.execute(sql,&[&timestamp,&system_address,&name,&inner_rad,&outer_rad,&mass_mt,&class,&odyssey,&id]).await {
+                            Ok(_) => {}
+                            Err(err) => {
+                                if !err.to_string().contains("violates foreign key constraint") {
+                                    panic!("{}", err);
+                                }
+                            }
+                        }
                 }
             }
 

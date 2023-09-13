@@ -192,6 +192,7 @@ create table if not exists ring
 (
     timestamp      bigint,
     system_address bigint,
+    body_id        integer,
     name           varchar,
     inner_rad      real,
     outer_rad      real,
@@ -199,8 +200,8 @@ create table if not exists ring
     class          varchar,
     odyssey        boolean NOT NULL,
 
-    primary key (system_address, name, odyssey),
-    foreign key (system_address, odyssey) references system (address, odyssey)
+    primary key (system_address, body_id, odyssey),
+    foreign key (system_address, body_id, odyssey) references body (system_address, id, odyssey)
 );
 
 
