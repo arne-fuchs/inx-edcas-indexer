@@ -14,7 +14,6 @@ use iota_sdk::client::mqtt::{MqttEvent, MqttPayload, Topic};
 use iota_sdk::types::block::BlockDto;
 use iota_sdk::types::block::payload::dto::PayloadDto;
 use iota_sdk::types::block::signature::Ed25519Signature;
-use log::LevelFilter::Debug;
 use rustc_hex::FromHex;
 use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
@@ -23,16 +22,6 @@ use tokio_postgres::NoTls;
 async fn main() {
     println!("Getting ready...");
     dotenv().expect(".env file not found");
-
-    let logger_output_config = fern_logger::LoggerOutputConfigBuilder::new()
-        .name("indexer.log")
-        .target_exclusions(&["h2", "hyper", "rustls","iota_wallet","iota_client","reqwest","tungstenite","rumqttc"])
-        .level_filter(Debug);
-
-    let config = fern_logger::LoggerConfig::build()
-        .with_output(logger_output_config)
-        .finish();
-    fern_logger::logger_init(config).unwrap();
 
     let username = std::env::var("DATABASE_USER").unwrap();
     let password = std::env::var("DATABASE_PASSWORD").unwrap();
@@ -147,7 +136,9 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                                     Ok(json) => {
                                         event_handler::handle_event(json,client).await;
                                     }
-                                    Err(_) => {}
+                                    Err(_) => {
+                                        println!("Unable to parse json!");
+                                    }
                                 }
                             } else {
                                 println!("Signature verification failed.");
