@@ -1,23 +1,27 @@
 mod event_handler;
 
-
 use std::sync::Arc;
 use dotenv::dotenv;
 use std::io;
 use std::io::Read;
 use std::str::FromStr;
 use std::sync::mpsc::channel;
+use base64::Engine;
+use base64::engine::general_purpose;
 use flate2::read::ZlibDecoder;
 use iota_sdk::client::Client;
 use iota_sdk::client::mqtt::{MqttEvent, MqttPayload, Topic};
 use iota_sdk::types::block::BlockDto;
 use iota_sdk::types::block::payload::dto::PayloadDto;
+use iota_sdk::types::block::signature::Ed25519Signature;
 use log::LevelFilter::Debug;
+use rustc_hex::FromHex;
 use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
 
 #[tokio::main]
 async fn main() {
+    println!("Getting ready...");
     dotenv().expect(".env file not found");
 
     let logger_output_config = fern_logger::LoggerOutputConfigBuilder::new()
@@ -109,22 +113,45 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                 PayloadDto::Milestone(_) => {}
                 PayloadDto::TreasuryTransaction(_) => {}
                 PayloadDto::TaggedData(tagged_data) => {
-                    let tag = String::from_utf8(tagged_data.tag.to_vec()).unwrap();
-                    if tag != "EDDN".to_string() {
-                        println!("{}",tag);
-                    }
+                    //let tag = String::from_utf8(tagged_data.tag.to_vec()).unwrap();
+                    //if tag != "EDDN".to_string() {
+                    //    println!("{}",tag);
+                    //}
 
-                    let data = tagged_data.data.to_vec();
-                    let message = decode_reader(data).unwrap();
-                    let result = json::parse(message.as_str());
+                    let result = json::parse(String::from_utf8(tagged_data.data.to_vec()).unwrap().as_str());
                     match result {
                         Ok(json) => {
-                            //let message = json["message"].clone();
-                            //println!("{message}");
-                            //println!("{}",&json);
-                            //let sql = "INSERT INTO pid VALUES (address = ?)";
-                            //client.lock().await.execute(sql,&[]).await.unwrap();
-                            event_handler::handle_event(json,client).await;
+
+                            if String::from_utf8(tagged_data.tag.to_vec()).unwrap() == "EDDN".to_string() && json["public_key"].as_str().unwrap() != std::env::var("EDDN_PUBLIC_KEY").unwrap() {
+                                return;
+                            }
+                            let data = general_purpose::STANDARD.decode(json["message"].as_str().unwrap()).unwrap();
+
+                            let pub_key_bytes: Vec<u8> = json["public_key"].as_str().unwrap()[2..].from_hex().unwrap();
+                            let mut pub_key: [u8;32] = [0u8;32];
+                            pub_key[0..32].copy_from_slice(&pub_key_bytes[0..32]);
+
+                            let sig_bytes: Vec<u8> = json["signature"].as_str().unwrap()[2..].from_hex().unwrap();
+                            let mut sig: [u8;64] = [0u8;64];
+                            sig[0..64].copy_from_slice(&sig_bytes[0..64]);
+
+                            let sig = Ed25519Signature::try_from_bytes(pub_key,sig).unwrap();
+
+                            if sig.verify(data.as_slice()) {
+                                //let message = json["message"].clone();
+                                //println!("{message}");
+                                //println!("{}",&json);
+                                //let sql = "INSERT INTO pid VALUES (address = ?)";
+                                //client.lock().await.execute(sql,&[]).await.unwrap();
+                                match json::parse(decode_reader(data).unwrap().as_str()) {
+                                    Ok(json) => {
+                                        event_handler::handle_event(json,client).await;
+                                    }
+                                    Err(_) => {}
+                                }
+                            } else {
+                                println!("Signature verification failed.");
+                            }
                         }
                         Err(_) => {}
                     }
