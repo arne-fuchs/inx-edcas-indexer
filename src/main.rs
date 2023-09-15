@@ -116,6 +116,7 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                             }
                             let data = general_purpose::STANDARD.decode(json["message"].as_str().unwrap()).unwrap();
 
+                            let p_key = json["public_key"].to_string();
                             let pub_key_bytes: Vec<u8> = json["public_key"].as_str().unwrap()[2..].from_hex().unwrap();
                             let mut pub_key: [u8;32] = [0u8;32];
                             pub_key[0..32].copy_from_slice(&pub_key_bytes[0..32]);
@@ -130,8 +131,9 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                                 //let message = json["message"].clone();
                                 //println!("{message}");
                                 //println!("{}",&json);
-                                //let sql = "INSERT INTO pid VALUES (address = ?)";
-                                //client.lock().await.execute(sql,&[]).await.unwrap();
+                                //language=postgresql
+                                let sql = "INSERT INTO pid VALUES ($1) ON CONFLICT (pkey) DO NOTHING;";
+                                client.lock().await.execute(sql,&[&p_key]).await.unwrap();
                                 match json::parse(decode_reader(data).unwrap().as_str()) {
                                     Ok(json) => {
                                         event_handler::handle_event(json,client).await;
