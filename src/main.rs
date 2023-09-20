@@ -2,7 +2,7 @@ mod event_handler;
 
 use std::sync::Arc;
 use dotenv::dotenv;
-use std::io;
+use std::{io, process};
 use std::io::Read;
 use std::str::FromStr;
 use std::sync::mpsc::channel;
@@ -128,6 +128,9 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                             let sig = Ed25519Signature::try_from_bytes(pub_key,sig).unwrap();
 
                             if sig.verify(data.as_slice()) {
+                                if client.lock().await.is_closed(){
+                                    process::exit(20);
+                                }
                                 //let message = json["message"].clone();
                                 //println!("{message}");
                                 //println!("{}",&json);
