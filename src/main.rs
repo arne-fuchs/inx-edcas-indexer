@@ -64,7 +64,7 @@ async fn main() {
         }
     });
 
-    let tags = vec![hex::encode("EDDN"),hex::encode("SCAN"),hex::encode("FSDJUMP"),hex::encode("LOCATION"),hex::encode("CARRIERJUMP")];
+    let tags = vec![hex::encode("EDDN"),hex::encode("SCAN"),hex::encode("FSDJUMP"),hex::encode("LOCATION"),hex::encode("CARRIERJUMP"),hex::encode("FSSBODYSIGNALS"),hex::encode("SAASIGNALSFOUND"),];
     let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{tag}")).unwrap());
     println!("Listening topics: {:?}",topics);
     node
