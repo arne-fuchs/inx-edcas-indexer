@@ -269,6 +269,20 @@ create table if not exists commodity
     foreign key (market_id, odyssey) references station (market_id, odyssey)
 );
 
+create table if not exists commodity_history (
+    timestamp      bigint,
+    name           varchar,
+    buy_price      integer,
+    sell_price     integer,
+    mean_price     integer,
+    demand_bracket integer,
+    stock          integer,
+    stock_bracket  integer,
+    odyssey        boolean NOT NULL,
+
+    primary key (timestamp,name,odyssey)
+);
+
 create table if not exists parent
 (
     system_address bigint NOT NULL,

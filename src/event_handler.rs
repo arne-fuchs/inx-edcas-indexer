@@ -20,7 +20,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
     //Check if data is too old (false data)
     let parsed_date_time = DateTime::parse_from_rfc3339(message["timestamp"].as_str().unwrap()).unwrap();
     let current_date_time = Utc::now();
-    let max_age = Duration::hours(1);
+    let max_age = Duration::minutes(10);
     let time_difference = current_date_time.signed_duration_since(parsed_date_time);
     if time_difference > max_age {
         //println!("Found too old data(Current: {} Found: {}): {}",current_date_time, parsed_date_time, json);
@@ -943,7 +943,9 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                 &system_name,
                                 &odyssey
                             ]).await {
-                                Ok(_) => {}
+                                Ok(_) => {
+
+                                }
                                 Err(err) => {
                                     if !err.to_string().contains("violates foreign key constraint") {
                                         panic!("{}", err);
@@ -957,26 +959,82 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                             client.lock().await.execute(delete, &[&market_id, &odyssey]).await.unwrap();
                         }
                         for i in 0..message["commodities"].len() {
-                            //language=postgresql
-                            let insert = "INSERT INTO commodity VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (name,market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, market_id = excluded.market_id, name = excluded.name, buy_price = excluded.buy_price, sell_price = excluded.sell_price,
+                            {
+                                //language=postgresql
+                                let insert = "INSERT INTO commodity VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (name,market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, market_id = excluded.market_id, name = excluded.name, buy_price = excluded.buy_price, sell_price = excluded.sell_price,
                                                                                                                      mean_price = excluded.mean_price, demand_bracket = excluded.demand_bracket, stock = excluded.stock, stock_bracket = excluded.stock_bracket, odyssey = excluded.odyssey;";
 
-                            match client.lock().await.execute(insert, &[
-                                &timestamp,
-                                &market_id,
-                                &message["commodities"][i]["name"].to_string(),
-                                &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
-                                &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
-                                &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
-                                &message["commodities"][i]["demandBracket"].as_i32(),
-                                &message["commodities"][i]["stock"].as_i32().unwrap(),
-                                &message["commodities"][i]["stockBracket"].as_i32(),
-                                &odyssey
-                            ]).await {
-                                Ok(_) => {}
-                                Err(err) => {
-                                    if !err.to_string().contains("violates foreign key constraint") {
-                                        panic!("{}", err);
+                                match client.lock().await.execute(insert, &[
+                                    &timestamp,
+                                    &market_id,
+                                    &message["commodities"][i]["name"].to_string().to_lowercase(),
+                                    &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
+                                    &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
+                                    &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
+                                    &message["commodities"][i]["demandBracket"].as_i32(),
+                                    &message["commodities"][i]["stock"].as_i32().unwrap(),
+                                    &message["commodities"][i]["stockBracket"].as_i32(),
+                                    &odyssey
+                                ]).await {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        if !err.to_string().contains("violates foreign key constraint") {
+                                            panic!("{}", err);
+                                        }
+                                    }
+                                }
+                            }
+                            {
+                                //language=postgresql
+                                let select = "SELECT timestamp from commodity_history where name=$1 and odyssey=$2 order by timestamp desc limit 1;";
+                                let result = client.lock().await.query(select,&[
+                                    &message["commodities"][i]["name"].to_string().to_lowercase(),
+                                    &odyssey
+                                ]).await;
+
+                                match result {
+                                    Ok(res) => {
+                                        match res.first(){
+                                            None => {
+                                                //No data yes available
+                                                //language=postgresql
+                                                let insert = "INSERT INTO commodity_history VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);";
+                                                client.lock().await.execute(insert, &[
+                                                    &timestamp,
+                                                    &message["commodities"][i]["name"].to_string().to_lowercase(),
+                                                    &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
+                                                    &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
+                                                    &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
+                                                    &message["commodities"][i]["demandBracket"].as_i32(),
+                                                    &message["commodities"][i]["stock"].as_i32().unwrap(),
+                                                    &message["commodities"][i]["stockBracket"].as_i32(),
+                                                    &odyssey
+                                                ]).await.unwrap();
+                                            }
+                                            Some(row) => {
+                                                let commodity_timestamp: i64 = row.get(0);
+                                                //Insert only if the timestamp of the new commodity is older than an hour
+                                                //timestamp has its timestamp in seconds since 1970
+                                                if timestamp - commodity_timestamp > 60*60 {
+                                                    //language=postgresql
+                                                    let insert = "INSERT INTO commodity_history VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);";
+                                                    client.lock().await.execute(insert, &[
+                                                        &timestamp,
+                                                        &message["commodities"][i]["name"].to_string().to_lowercase(),
+                                                        &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
+                                                        &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
+                                                        &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
+                                                        &message["commodities"][i]["demandBracket"].as_i32(),
+                                                        &message["commodities"][i]["stock"].as_i32().unwrap(),
+                                                        &message["commodities"][i]["stockBracket"].as_i32(),
+                                                        &odyssey
+                                                    ]).await.unwrap();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        println!("commodity_history select: {}",err);
                                     }
                                 }
                             }
