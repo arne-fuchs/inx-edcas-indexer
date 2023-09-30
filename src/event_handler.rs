@@ -839,10 +839,11 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
         "Fileheader" => {}
         "Shutdown" => {}
         "None" | "" | _ => {
+            println!("{}",&json);
             let market_id = message["marketId"].as_i64().unwrap();
             let station_name = message["stationName"].to_string();
             let system_name = message["systemName"].to_string();
-            let odyssey = message["odyssey"].as_bool().unwrap();
+            let odyssey = message["odyssey"].as_bool().unwrap_or(!message["horizons"].as_bool().unwrap());
             if !message["ships"].is_null() {
                 //ships
                 {
