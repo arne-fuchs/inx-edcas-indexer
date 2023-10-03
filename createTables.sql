@@ -149,7 +149,7 @@ create table if not exists atmosphere_composition
     system_address bigint,
     body_id        integer,
     name           varchar,
-    percent        real,
+    percentage     real,
     odyssey        boolean NOT NULL,
 
     primary key (system_address, body_id, odyssey),
