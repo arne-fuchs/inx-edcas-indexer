@@ -1001,12 +1001,29 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
 
                                                 //language=postgresql
                                                 let min_select = "SELECT min(buy_price) FROM commodity WHERE odyssey=$1 and name=$2 and stock > 1000;";
-                                                let min = client.lock().await.query_one(min_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                let min_row = client.lock().await.query_one(min_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                let min = match min_row.try_get::<usize,i32>(0) {
+                                                    Ok(min) => {min},
+                                                    Err(_) => {
+                                                        //language=postgresql
+                                                        let min_select = "SELECT min(buy_price) FROM commodity WHERE odyssey=$1 and name=$2;";
+                                                        let min_row = client.lock().await.query_one(min_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                        min_row.get::<usize,i32>(0)
+                                                    },
+                                                };
 
                                                 //language=postgresql
                                                 let max_select = "SELECT max(sell_price) FROM commodity WHERE odyssey=$1 and name=$2 and demand > 1000;";
-                                                let max = client.lock().await.query_one(max_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
-
+                                                let max_row = client.lock().await.query_one(max_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                let max = match max_row.try_get::<usize,i32>(0) {
+                                                    Ok(max) => {max},
+                                                    Err(_) => {
+                                                        //language=postgresql
+                                                        let max_select = "SELECT max(sell_price) FROM commodity WHERE odyssey=$1 and name=$2;";
+                                                        let max_row = client.lock().await.query_one(max_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                        max_row.get::<usize,i32>(0)
+                                                    },
+                                                };
                                                 //language=postgresql
                                                 let avg_select = "SELECT avg(mean_price) FROM commodity WHERE odyssey=$1 and name=$2 and demand > 1000;";
                                                 let avg = client.lock().await.query_one(avg_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
