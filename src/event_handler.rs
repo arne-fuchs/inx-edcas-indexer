@@ -1033,8 +1033,8 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                                 client.lock().await.execute(insert, &[
                                                     &timestamp,
                                                     &message["commodities"][i]["name"].to_string().to_lowercase(),
-                                                    &min.get::<usize,i32>(0),
-                                                    &max.get::<usize,i32>(0),
+                                                    &min,
+                                                    &max,
                                                     &avg.get::<usize,i32>(0),
                                                     &odyssey
                                                 ]).await.unwrap();
