@@ -1027,8 +1027,6 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                                 //Insert only if the timestamp of the new commodity is older than an hour
                                                 //timestamp has its timestamp in seconds since 1970
                                                 if timestamp - commodity_timestamp > 60*60 {
-                                                    println!("{} {}",&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase());
-
                                                     //language=postgresql
                                                     let min_select = "SELECT min(buy_price) FROM commodity WHERE odyssey=$1 and name=$2 and stock > 1000;";
                                                     let min_row = client.lock().await.query_one(min_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
@@ -1056,7 +1054,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                                     };
 
                                                     //language=postgresql
-                                                    let avg_select = "SELECT cast(avg(mean_price) OVER () as INTEGER) FROM commodity WHERE odyssey=$1 and name=$2;";
+                                                    let avg_select = "SELECT distinct CAST(AVG(mean_price) OVER () as INTEGER) as avg_mean_price FROM commodity WHERE odyssey=$1 and name=$2;";
                                                     let avg = client.lock().await.query_one(avg_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
 
                                                     //language=postgresql
