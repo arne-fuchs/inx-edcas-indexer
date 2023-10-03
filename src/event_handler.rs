@@ -1056,7 +1056,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                                     };
 
                                                     //language=postgresql
-                                                    let avg_select = "SELECT avg(mean_price) FROM commodity WHERE odyssey=$1 and name=$2;";
+                                                    let avg_select = "SELECT cast(avg(mean_price) OVER () as INTEGER) FROM commodity WHERE odyssey=$1 and name=$2;";
                                                     let avg = client.lock().await.query_one(avg_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
 
                                                     //language=postgresql
@@ -1066,7 +1066,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                                         &message["commodities"][i]["name"].to_string().to_lowercase(),
                                                         &min,
                                                         &max,
-                                                        &(avg.get::<usize,f32>(0).round() as i32),
+                                                        &avg.get::<usize,i32>(0),
                                                         &odyssey
                                                     ]).await.unwrap();
                                                 }
