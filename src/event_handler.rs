@@ -1066,7 +1066,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                                         &message["commodities"][i]["name"].to_string().to_lowercase(),
                                                         &min,
                                                         &max,
-                                                        &avg.get::<usize,i32>(0),
+                                                        &(avg.get::<usize,f32>(0).round() as i32),
                                                         &odyssey
                                                     ]).await.unwrap();
                                                 }
