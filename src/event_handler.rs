@@ -961,8 +961,8 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                         for i in 0..message["commodities"].len() {
                             {
                                 //language=postgresql
-                                let insert = "INSERT INTO commodity VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (name,market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, market_id = excluded.market_id, name = excluded.name, buy_price = excluded.buy_price, sell_price = excluded.sell_price,
-                                                                                                                     mean_price = excluded.mean_price, demand_bracket = excluded.demand_bracket, stock = excluded.stock, stock_bracket = excluded.stock_bracket, odyssey = excluded.odyssey;";
+                                let insert = "INSERT INTO commodity (timestamp, market_id, name, buy_price, sell_price, mean_price, demand, demand_bracket, stock, stock_bracket, odyssey) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (name,market_id,odyssey) DO UPDATE SET timestamp = excluded.timestamp, market_id = excluded.market_id, name = excluded.name, buy_price = excluded.buy_price, sell_price = excluded.sell_price,
+                                                                                                                     mean_price = excluded.mean_price, demand=excluded.demand, demand_bracket = excluded.demand_bracket, stock = excluded.stock, stock_bracket = excluded.stock_bracket, odyssey = excluded.odyssey;";
 
                                 match client.lock().await.execute(insert, &[
                                     &timestamp,
@@ -971,6 +971,7 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                     &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
                                     &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
                                     &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
+                                    &message["commodities"][i]["demand"].as_i32().unwrap(),
                                     &message["commodities"][i]["demandBracket"].as_i32(),
                                     &message["commodities"][i]["stock"].as_i32().unwrap(),
                                     &message["commodities"][i]["stockBracket"].as_i32(),
@@ -996,15 +997,28 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                     Ok(res) => {
                                         match res.first(){
                                             None => {
-                                                //No data yes available
+                                                //No data yet available
+
+                                                //language=postgresql
+                                                let min_select = "SELECT min(buy_price) FROM commodity WHERE odyssey=$1 and name=$2 and stock > 1000;";
+                                                let min = client.lock().await.query_one(min_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+
+                                                //language=postgresql
+                                                let max_select = "SELECT max(sell_price) FROM commodity WHERE odyssey=$1 and name=$2 and demand > 1000;";
+                                                let max = client.lock().await.query_one(max_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+
+                                                //language=postgresql
+                                                let avg_select = "SELECT avg(mean_price) FROM commodity WHERE odyssey=$1 and name=$2 and demand > 1000;";
+                                                let avg = client.lock().await.query_one(avg_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+
                                                 //language=postgresql
                                                 let insert = "INSERT INTO commodity_history VALUES ($1,$2,$3,$4,$5,$6);";
                                                 client.lock().await.execute(insert, &[
                                                     &timestamp,
                                                     &message["commodities"][i]["name"].to_string().to_lowercase(),
-                                                    &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
-                                                    &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
-                                                    &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
+                                                    &min.get::<usize,i32>(0),
+                                                    &max.get::<usize,i32>(0),
+                                                    &avg.get::<usize,i32>(0),
                                                     &odyssey
                                                 ]).await.unwrap();
                                             }
@@ -1013,14 +1027,44 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                                 //Insert only if the timestamp of the new commodity is older than an hour
                                                 //timestamp has its timestamp in seconds since 1970
                                                 if timestamp - commodity_timestamp > 60*60 {
+                                                    println!("{} {}",&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase());
+
+                                                    //language=postgresql
+                                                    let min_select = "SELECT min(buy_price) FROM commodity WHERE odyssey=$1 and name=$2 and stock > 1000;";
+                                                    let min_row = client.lock().await.query_one(min_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                    let min = match min_row.try_get::<usize,i32>(0) {
+                                                        Ok(min) => {min},
+                                                        Err(_) => {
+                                                            let min_select = "SELECT min(buy_price) FROM commodity WHERE odyssey=$1 and name=$2 and stock;";
+                                                            let min_row = client.lock().await.query_one(min_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                            min_row.get::<usize,i32>(0)
+                                                        },
+                                                    };
+
+                                                    //language=postgresql
+                                                    let max_select = "SELECT max(sell_price) FROM commodity WHERE odyssey=$1 and name=$2 and demand > 1000;";
+                                                    let max_row = client.lock().await.query_one(max_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                    let max = match max_row.try_get::<usize,i32>(0) {
+                                                        Ok(max) => {max},
+                                                        Err(_) => {
+                                                            let max_select = "SELECT max(sell_price) FROM commodity WHERE odyssey=$1 and name=$2 and demand > 1000;";
+                                                            let max_row = client.lock().await.query_one(max_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+                                                            max_row.get::<usize,i32>(0)
+                                                        },
+                                                    };
+
+                                                    //language=postgresql
+                                                    let avg_select = "SELECT avg(mean_price) FROM commodity WHERE odyssey=$1 and name=$2;";
+                                                    let avg = client.lock().await.query_one(avg_select,&[&odyssey,&message["commodities"][i]["name"].to_string().to_lowercase()]).await.unwrap();
+
                                                     //language=postgresql
                                                     let insert = "INSERT INTO commodity_history VALUES ($1,$2,$3,$4,$5,$6);";
                                                     client.lock().await.execute(insert, &[
                                                         &timestamp,
                                                         &message["commodities"][i]["name"].to_string().to_lowercase(),
-                                                        &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
-                                                        &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
-                                                        &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
+                                                        &min,
+                                                        &max,
+                                                        &avg.get::<usize,i32>(0),
                                                         &odyssey
                                                     ]).await.unwrap();
                                                 }

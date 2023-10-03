@@ -260,6 +260,7 @@ create table if not exists commodity
     buy_price      integer,
     sell_price     integer,
     mean_price     integer,
+    demand         integer,
     demand_bracket integer,
     stock          integer,
     stock_bracket  integer,
