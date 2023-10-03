@@ -275,9 +275,6 @@ create table if not exists commodity_history (
     buy_price      integer,
     sell_price     integer,
     mean_price     integer,
-    demand_bracket integer,
-    stock          integer,
-    stock_bracket  integer,
     odyssey        boolean NOT NULL,
 
     primary key (timestamp,name,odyssey)

@@ -998,16 +998,13 @@ pub async fn handle_event(json: JsonValue, client: Arc<Mutex<tokio_postgres::Cli
                                             None => {
                                                 //No data yes available
                                                 //language=postgresql
-                                                let insert = "INSERT INTO commodity_history VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);";
+                                                let insert = "INSERT INTO commodity_history VALUES ($1,$2,$3,$4,$5,$6);";
                                                 client.lock().await.execute(insert, &[
                                                     &timestamp,
                                                     &message["commodities"][i]["name"].to_string().to_lowercase(),
                                                     &message["commodities"][i]["buyPrice"].as_i32().unwrap(),
                                                     &message["commodities"][i]["sellPrice"].as_i32().unwrap(),
                                                     &message["commodities"][i]["meanPrice"].as_i32().unwrap(),
-                                                    &message["commodities"][i]["demandBracket"].as_i32(),
-                                                    &message["commodities"][i]["stock"].as_i32().unwrap(),
-                                                    &message["commodities"][i]["stockBracket"].as_i32(),
                                                     &odyssey
                                                 ]).await.unwrap();
                                             }
