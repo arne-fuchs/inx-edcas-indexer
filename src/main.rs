@@ -113,16 +113,10 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                 PayloadDto::Milestone(_) => {}
                 PayloadDto::TreasuryTransaction(_) => {}
                 PayloadDto::TaggedData(tagged_data) => {
-                    //let tag = String::from_utf8(tagged_data.tag.to_vec()).unwrap();
-                    //if tag != "EDDN".to_string() {
-                    //    println!("{}",tag);
-                    //}
-
                     let result = json::parse(String::from_utf8(tagged_data.data.to_vec()).unwrap().as_str());
                     match result {
                         Ok(json) => {
                             let tag = String::from_utf8(tagged_data.tag.to_vec()).unwrap();
-
                             if (tag == "EDDN".to_string() && json["public_key"].as_str().unwrap() != std::env::var("EDDN_PUBLIC_KEY").unwrap()) || std::env::var("TAGS").unwrap().replace("EDDN","").contains(&tag) {
                                 return;
                             }
