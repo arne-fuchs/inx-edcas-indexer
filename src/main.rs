@@ -65,10 +65,10 @@ async fn main() {
 
     let tag_env = std::env::var("TAGS").unwrap().to_string();
     let tags: Vec<&str> = tag_env.split(",").collect();
-    println!("Tags:");
+    println!("Tags: {:?}", &tags);
 
 
-    let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{tag}")).unwrap());
+    let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{}",hex::encode(tag))).unwrap());
     println!("Listening topics: {:?}",topics);
     node
         .subscribe(

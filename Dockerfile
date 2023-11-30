@@ -21,6 +21,7 @@ WORKDIR /app
 
 # Copy just the compiled binary from the previous stage
 COPY --from=builder /app/target/release/inx-edcas-indexer /app/
+COPY --from=builder /app/createTables.sql /app/
 
 # Set the entry point
 CMD ["./inx-edcas-indexer"]
