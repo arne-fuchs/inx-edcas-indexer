@@ -29,9 +29,9 @@ async fn main() {
     let db_host = std::env::var("DATABASE_HOST").unwrap();
     println!("DB_Host: {}", &db_host);
     let db_port = std::env::var("DATABASE_PORT").unwrap();
-    println!("DB_Port: {}", &db_host);
+    println!("DB_Port: {}", &db_port);
     let database = std::env::var("DATABASE_NAME").unwrap_or("edcas".to_string());
-    println!("Database: {}", &db_host);
+    println!("Database: {}", &database);
     let pow_worker_count = usize::from_str(std::env::var("NUM_OF_WORKERS").unwrap_or("4".to_string()).as_str()).unwrap();
 
     let tag_env = std::env::var("TAGS").unwrap().to_string();
