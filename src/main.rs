@@ -22,13 +22,27 @@ mod event_handler;
 async fn main() {
     println!("Getting ready...");
 
+    let node_url = std::env::var("NODE_URL").unwrap();
+    println!("Node_url: {}", &node_url);
     let username = std::env::var("POSTGRES_USER").unwrap();
     let password = std::env::var("POSTGRES_PASSWORD").unwrap();
-    let server = std::env::var("DATABASE_HOST").unwrap();
-    let port = std::env::var("DATABASE_PORT").unwrap();
-    let database = std::env::var("DATABASE_NAME").unwrap();
+    let db_host = std::env::var("DATABASE_HOST").unwrap();
+    println!("DB_Host: {}", &db_host);
+    let db_port = std::env::var("DATABASE_PORT").unwrap();
+    println!("DB_Port: {}", &db_host);
+    let database = std::env::var("DATABASE_NAME").unwrap_or("edcas".to_string());
+    println!("Database: {}", &db_host);
+    let pow_worker_count = usize::from_str(std::env::var("NUM_OF_WORKERS").unwrap_or("4".to_string()).as_str()).unwrap();
 
-    let connection_string = format!("postgresql://{username}:{password}@{server}:{port}/{database}");
+    let tag_env = std::env::var("TAGS").unwrap().to_string();
+    let tags: Vec<&str> = tag_env.split(",").collect();
+    println!("Tags: {:?}", &tags);
+
+
+    let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{}",hex::encode(tag))).unwrap());
+    println!("Listening topics: {:?}",topics);
+
+    let connection_string = format!("postgresql://{username}:{password}@{db_host}:{db_port}/{database}");
 
     let (client, connection) = tokio_postgres::connect(connection_string.as_str(), NoTls).await.unwrap();
 
@@ -44,8 +58,8 @@ async fn main() {
     let shareable_client = Arc::new(Mutex::new(client));
 
     let node = Client::builder()
-        .with_node(std::env::var("NODE_URL").unwrap().as_str()).unwrap()
-        .with_pow_worker_count(usize::from_str(std::env::var("NUM_OF_WORKERS").unwrap_or("4".to_string()).as_str()).unwrap())
+        .with_node(node_url.as_str()).unwrap()
+        .with_pow_worker_count(pow_worker_count)
         .with_local_pow(true)
         .finish().await.unwrap();
 
@@ -63,13 +77,7 @@ async fn main() {
         }
     });
 
-    let tag_env = std::env::var("TAGS").unwrap().to_string();
-    let tags: Vec<&str> = tag_env.split(",").collect();
-    println!("Tags: {:?}", &tags);
 
-
-    let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{}",hex::encode(tag))).unwrap());
-    println!("Listening topics: {:?}",topics);
     node
         .subscribe(
             topics,
