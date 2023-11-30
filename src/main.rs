@@ -1,11 +1,9 @@
-mod event_handler;
-
-use std::sync::Arc;
-use dotenv::dotenv;
 use std::{io, process};
 use std::io::Read;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::mpsc::channel;
+
 use base64::Engine;
 use base64::engine::general_purpose;
 use flate2::read::ZlibDecoder;
@@ -18,14 +16,15 @@ use rustc_hex::FromHex;
 use tokio::sync::Mutex;
 use tokio_postgres::NoTls;
 
+mod event_handler;
+
 #[tokio::main]
 async fn main() {
     println!("Getting ready...");
-    dotenv().expect(".env file not found");
 
-    let username = std::env::var("DATABASE_USER").unwrap();
-    let password = std::env::var("DATABASE_PASSWORD").unwrap();
-    let server = std::env::var("DATABASE_SERVER").unwrap();
+    let username = std::env::var("POSTGRES_USER").unwrap();
+    let password = std::env::var("POSTGRES_PASSWORD").unwrap();
+    let server = std::env::var("DATABASE_HOST").unwrap();
     let port = std::env::var("DATABASE_PORT").unwrap();
     let database = std::env::var("DATABASE_NAME").unwrap();
 
@@ -46,7 +45,7 @@ async fn main() {
 
     let node = Client::builder()
         .with_node(std::env::var("NODE_URL").unwrap().as_str()).unwrap()
-        .with_pow_worker_count(usize::from_str(std::env::var("NUM_OF_WORKERS").unwrap().as_str()).unwrap())
+        .with_pow_worker_count(usize::from_str(std::env::var("NUM_OF_WORKERS").unwrap_or("4".to_string()).as_str()).unwrap())
         .with_local_pow(true)
         .finish().await.unwrap();
 
@@ -64,7 +63,11 @@ async fn main() {
         }
     });
 
-    let tags = vec![hex::encode("EDDN"),hex::encode("SCAN"),hex::encode("FSDJUMP"),hex::encode("LOCATION"),hex::encode("CARRIERJUMP"),hex::encode("FSSBODYSIGNALS"),hex::encode("SAASIGNALSFOUND"),];
+    let tag_env = std::env::var("TAGS").unwrap().to_string();
+    let tags: Vec<&str> = tag_env.split(",").collect();
+    println!("Tags:");
+
+
     let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{tag}")).unwrap());
     println!("Listening topics: {:?}",topics);
     node
@@ -110,8 +113,9 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                     let result = json::parse(String::from_utf8(tagged_data.data.to_vec()).unwrap().as_str());
                     match result {
                         Ok(json) => {
+                            let tag = String::from_utf8(tagged_data.tag.to_vec()).unwrap();
 
-                            if String::from_utf8(tagged_data.tag.to_vec()).unwrap() == "EDDN".to_string() && json["public_key"].as_str().unwrap() != std::env::var("EDDN_PUBLIC_KEY").unwrap() {
+                            if (tag == "EDDN".to_string() && json["public_key"].as_str().unwrap() != std::env::var("EDDN_PUBLIC_KEY").unwrap()) || std::env::var("TAGS").unwrap().replace("EDDN","").contains(&tag) {
                                 return;
                             }
                             let data = general_purpose::STANDARD.decode(json["message"].as_str().unwrap()).unwrap();
