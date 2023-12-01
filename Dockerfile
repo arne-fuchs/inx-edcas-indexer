@@ -24,4 +24,4 @@ COPY --from=builder /app/target/release/inx-edcas-indexer /app/
 COPY --from=builder /app/createTables.sql /app/
 
 # Set the entry point
-CMD ["./inx-edcas-indexer"]
+CMD ["/app/inx-edcas-indexer"]
