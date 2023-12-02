@@ -42,6 +42,7 @@ async fn main() {
     let topics = tags.iter().map(|tag| Topic::new(format!("blocks/tagged-data/0x{}",hex::encode(tag))).unwrap());
     println!("Listening topics: {:?}",topics);
 
+    println!("Connect to database");
     let connection_string = format!("postgresql://{username}:{password}@{db_host}:{db_port}/{database}");
 
     let (client, connection) = tokio_postgres::connect(connection_string.as_str(), NoTls).await.unwrap();
@@ -51,10 +52,13 @@ async fn main() {
             eprintln!("connection error: {}", e);
         }
     });
-
+    println!("Connected");
+    println!("Running create Tables");
     let script = std::fs::read_to_string("createTables.sql").unwrap();
     client.batch_execute(&script).await.unwrap();
+    println!("Done");
 
+    println!("Connecting to node");
     let shareable_client = Arc::new(Mutex::new(client));
 
     let node = Client::builder()
@@ -72,12 +76,12 @@ async fn main() {
             let event = event_rx.borrow();
             if *event == MqttEvent::Disconnected {
                 println!("mqtt disconnected");
-                std::process::exit(1);
+                process::exit(1);
             }
         }
     });
 
-
+    println!("Starting MQTT");
     node
         .subscribe(
             topics,
@@ -98,6 +102,7 @@ async fn main() {
                 tx.lock().unwrap().send(()).unwrap();
             },
         ).await.unwrap();
+    println!("Done");
     loop {
         rx.recv().unwrap();
     }
@@ -117,9 +122,11 @@ async fn handle_block(block: BlockDto,client: Arc<Mutex<tokio_postgres::Client>>
                     match result {
                         Ok(json) => {
                             let tag = String::from_utf8(tagged_data.tag.to_vec()).unwrap();
-                            if (tag == "EDDN".to_string() && json["public_key"].as_str().unwrap() != std::env::var("EDDN_PUBLIC_KEY").unwrap()) || std::env::var("TAGS").unwrap().replace("EDDN","").contains(&tag) {
+                            if !std::env::var("TAGS").unwrap().contains(&tag) {
                                 return;
                             }
+                            //println!("{}",&json);
+
                             let data = general_purpose::STANDARD.decode(json["message"].as_str().unwrap()).unwrap();
 
                             let p_key = json["public_key"].to_string();
