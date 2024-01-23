@@ -8,7 +8,7 @@ use base64::Engine;
 use base64::engine::general_purpose;
 use flate2::read::ZlibDecoder;
 use iota_sdk::client::Client;
-use iota_sdk::client::mqtt::{MqttEvent, MqttPayload, Topic};
+use iota_sdk::client::mqtt::{Error, MqttEvent, MqttPayload, Topic};
 use iota_sdk::types::block::BlockDto;
 use iota_sdk::types::block::payload::dto::PayloadDto;
 use iota_sdk::types::block::signature::Ed25519Signature;
@@ -82,7 +82,7 @@ async fn main() {
     });
 
     println!("Starting MQTT");
-    node
+    let result = node
         .subscribe(
             topics,
             move |event| {
@@ -101,8 +101,17 @@ async fn main() {
                 }
                 tx.lock().unwrap().send(()).unwrap();
             },
-        ).await.unwrap();
-    println!("Done");
+        ).await;
+    match result {
+        Ok(_) => {
+            println!("Success");
+        }
+        Err(err) => {
+            println!("{}",err);
+            panic!("Couldn't connect to mqtt plugin")
+        }
+    }
+
     loop {
         rx.recv().unwrap();
     }
