@@ -49,7 +49,7 @@ async fn main() {
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            println!("connection error: {}", e);
         }
     });
     println!("Connected");
