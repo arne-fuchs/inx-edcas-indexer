@@ -30,7 +30,7 @@ jobs:
         uses: docker/setup-buildx-action@v1
 
       - name: Build Docker image
-        run: docker build --platform linux/amd64 -t frankthefish/inx-eddn:latest .
+        run: docker build --platform linux/amd64 -t frankthefish/inx-edcas-indexer:latest .
 
       - name: Login to Docker Hub
         if: success()
@@ -38,4 +38,4 @@ jobs:
 
       - name: Push Docker image to Docker Hub
         if: success()
-        run: docker push frankthefish/inx-eddn:latest
+        run: docker push frankthefish/inx-edcas-indexer:latest
