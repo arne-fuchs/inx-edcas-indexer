@@ -49,7 +49,6 @@ async fn main() {
     println!("DB_Port: {}", &db_port);
     let database = std::env::var("DATABASE_NAME").unwrap_or("edcas".to_string());
     println!("Database: {}", &database);
-    let pow_worker_count = usize::from_str(std::env::var("NUM_OF_WORKERS").unwrap_or("4".to_string()).as_str()).unwrap();
 
     let tag_env = std::env::var("TAGS").unwrap().to_string();
     let tags: Vec<&str> = tag_env.split(",").collect();
