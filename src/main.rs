@@ -82,7 +82,7 @@ async fn main() {
         string.push_str(inx_address.as_str());
         string.clone().as_str()
     }.parse().unwrap();
-
+    
     let inx_channel = {
         let mut result = Channel::builder(inx_url.clone()).connect().await;
         while result.is_err(){
@@ -144,7 +144,7 @@ async fn main() {
                                                 Some(payload) => {
                                                     let payload_clone = payload.clone();
                                                     tokio::spawn( async move {
-                                                        handle_block(payload_clone,client_clone.clone()).await;
+                                                        handle_payload(payload_clone, client_clone.clone()).await;
                                                     });
                                                    
                                                 }
@@ -166,7 +166,7 @@ async fn main() {
     }
 }
 
-async fn handle_block(payload: Payload,client: Arc<Mutex<tokio_postgres::Client>>) {
+async fn handle_payload(payload: Payload, client: Arc<Mutex<tokio_postgres::Client>>) {
     match payload {
         Payload::Transaction(_) => {}
         Payload::Milestone(_) => {}
